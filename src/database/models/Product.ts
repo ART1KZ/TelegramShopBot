@@ -1,0 +1,44 @@
+import { Schema, model } from "mongoose";
+
+const ProductSchema = new Schema({
+    created_at: {
+        type: Date,
+        default: () => new Date(),
+    },
+    city_id: {
+        type: Schema.Types.ObjectId,
+        ref: "City",
+        required: true,
+    },
+    name: {
+        type: String,
+        required: true,
+    },
+    rub_price: {
+        type: Number,
+        required: true,
+    },
+    btc_price: {
+        type: Number,
+        required: true,
+    },
+    status: {
+        type: String,
+        enum: ["available", "reserved", "sold"],
+        default: "available",
+    },
+    data: {
+        type: String,
+        required: true,
+    },
+    reserved_at: {
+        type: Date,
+    },
+    sold_at: {
+        type: Date,
+    }
+});
+
+const Product = model("Product", ProductSchema);
+
+export default Product;
