@@ -1,7 +1,6 @@
 import { Bot, InlineKeyboard, session } from "grammy";
 import { City, Product, Transaction } from "../database/models";
 import { connectToDatabase } from "../database/index";
-// import { buyProduct } from "./conversations/index"; // Импорт исправленного разговора
 import { cancelExpiredTransactions, generateUniqueAmount } from "./helpers";
 import cron from "node-cron";
 import { ExtendedContext, SessionData } from "./types";
