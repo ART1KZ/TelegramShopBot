@@ -1,4 +1,3 @@
-import mongoose from "mongoose";
 import { Transaction, Product } from "../../database/models";
 
 // Функция, отменяющая транзакции, которые пробыли в ожидании больше чем переданное количество минут
@@ -14,39 +13,24 @@ async function cancelExpiredTransactions(minutes: number) {
 
     // Отмена каждой истекшой транзакции
     for (const transaction of expiredTransactions) {
-        const session = await mongoose.startSession();
-        session.startTransaction();
-
         try {
-            // Обновляем транзакцию на "canceled"
-            await Transaction.updateOne(
-                { _id: transaction._id, status: "pending" }, // Проверяем, что статус не изменился
-                { status: "canceled" }
-            ).session(session);
-
-            // Возвращаем товар в "available"
-            await Product.updateOne(
-                { _id: transaction.product_id, status: "reserved" }, // Проверяем, что товар всё ещё зарезервирован
-                { status: "available", reserved_at: null }
-            ).session(session);
-
-            await session.commitTransaction();
-            console.log(`Отменена транзакция ${transaction._id}`);
+            await Transaction.deleteOne(
+                { _id: transaction._id, status: "pending" } // Проверяем, что статус не изменился
+            ),
+                // Возвращение товару статуса "available"
+                await Product.updateOne(
+                    { _id: transaction.product_id, status: "reserved" }, // Проверяем, что товар всё ещё зарезервирован
+                    { status: "available", reserved_at: null }
+                ),
+                console.log(
+                    `Отменена транзакция, находящаяся в ожидании ${transaction._id}`
+                );
         } catch (error) {
-            await session.abortTransaction();
             console.error(
-                `Ошибка при отмене транзакции ${transaction._id}:`,
+                `Ошибка при отмене транзакции, находящейся в ожидании ${transaction._id}:`,
                 error
             );
-        } finally {
-            session.endSession();
         }
-    }
-
-    if (expiredTransactions.length > 0) {
-        console.log(
-            `Отменено ${expiredTransactions.length} просроченных транзакций`
-        );
     }
 }
 

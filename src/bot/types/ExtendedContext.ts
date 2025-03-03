@@ -1,5 +1,5 @@
-import { Context, SessionFlavor} from "grammy";
-import { SessionData } from "./index"
+import { Context, SessionFlavor } from "grammy";
+import { SessionData } from "./index";
 
 type ExtendedContext = Context & SessionFlavor<SessionData>;
 

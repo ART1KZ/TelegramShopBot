@@ -1,9 +1,11 @@
 import { Bot, InlineKeyboard, session } from "grammy";
-import { City, Product, Transaction } from "../database/models";
+import { City, Product, Transaction, Configuration } from "../database/models";
 import { connectToDatabase } from "../database/index";
 import { cancelExpiredTransactions, generateUniqueAmount } from "./helpers";
 import cron from "node-cron";
 import { ExtendedContext, SessionData } from "./types";
+import { config } from "dotenv";
+import { brotliCompress } from "zlib";
 
 if (!process.env.TG_BOT_TOKEN) {
     throw new Error("Telegram bot токен не найден");
@@ -261,6 +263,22 @@ async function addRecords() {
                 btc_price: 0.0004043132,
                 rub_price: 99,
             });
+            await Product.create({
+                name: "Аккаунт Dota 2",
+                city_id: citiesIds[0],
+                data: "логин пароль222",
+                btc_price: 0.0004043132,
+                rub_price: 99,
+            });
+        }
+
+        const configCount = await Configuration.countDocuments();
+
+        if (!configCount) {
+            await Configuration.create({
+                adminPassword: "test",
+                btcAddress: "1Q7rzSJm6Su4ymxPJ22EUDktfSLhRPAoN4",
+            });
         }
     } catch (e) {
         console.error("Error during initialization:", e);
@@ -269,7 +287,7 @@ async function addRecords() {
 
 addRecords();
 
-//
+// Мидлвара для хранения сессий
 bot.use(
     session({
         initial: (): SessionData => ({
@@ -284,9 +302,9 @@ bot.use(
 // Обработчик команды /start
 bot.command("start", async (ctx) => {
     await sendMainMenu(ctx);
-    console.log(ctx.session);
 });
 
+// Обработка нажатий на кнопку
 bot.on("callback_query:data", async (ctx) => {
     const data = ctx.callbackQuery.data;
     const session = ctx.session;
@@ -301,88 +319,162 @@ bot.on("callback_query:data", async (ctx) => {
             cityKeyboard.text(`🏙️ ${city.name}`, `city_${city._id}`);
         });
         cityKeyboard.row().text("❌ Назад", "menu");
-        await ctx.editMessageText("Выберите город:", {
+        await ctx.editMessageText("🌆 Выберите город:", {
             reply_markup: cityKeyboard,
         });
+
+        // Если пользователь выбрал город (или нажал назад на моменте выбора товара)
     } else if (data.startsWith("city_")) {
         const cityId = data.split("_")[1];
         session.cityId = cityId;
         session.step = "product";
 
-        const products = await Product.find({
+        // Уникальные названия товаров
+        const uniqueProductNames = await Product.distinct("name", {
             city_id: cityId,
             status: "available",
         });
-        const productsKeyboard = new InlineKeyboard();
 
-        if (products.length === 0) {
-            return await ctx.editMessageText(
-                "В этом городе нет доступных товаров.",
-                {
-                    reply_markup: {
-                        inline_keyboard: [
-                            [{ text: "❌ Назад", callback_data: "cities" }],
-                        ],
-                    },
-                }
+        const uniqueProductNamesKeyboard = new InlineKeyboard();
+
+        if (uniqueProductNames.length === 0) {
+            return await ctx.answerCallbackQuery(
+                "В этом городе нет доступных товаров"
             );
         }
 
-        products.forEach((product) => {
-            productsKeyboard.text(product.name, `product_${product._id}`).row();
+        uniqueProductNames.forEach((product) => {
+            uniqueProductNamesKeyboard
+                .text(`📦 ${product}`, `product_${product}`)
+                .row();
         });
-        productsKeyboard.row().text("❌ Назад", "cities");
-        return await ctx.editMessageText("Выберите товар:", {
-            reply_markup: productsKeyboard,
+        uniqueProductNamesKeyboard.row().text("❌ Назад", "cities");
+        return await ctx.editMessageText("🛒 Выберите товар:", {
+            reply_markup: uniqueProductNamesKeyboard,
         });
     }
 
     // Если пользователь выбрал товар
     else if (data.startsWith("product_")) {
         const cityId = ctx.session.cityId;
-        const productId = data.split("_")[1];
-        session.productId = productId;
-        const product = await Product.findById(productId);
-        if (product && product.status === "available" && cityId) {
-            product.status = "reserved";
-            product.reserved_at = new Date();
-            await product.save();
+        const productName = data.split("_")[1];
+        const product = await Product.findOne({
+            name: productName,
+            status: "available",
+            city_id: cityId,
+        });
 
-            const transaction = new Transaction({
-                customer_tg_id: ctx.from.id,
-                product_id: product._id,
-                btc_amount: generateUniqueAmount(product.btc_price),
-                status: "pending",
-            });
-            await transaction.save();
-
-            return await ctx.editMessageText(
-                `Продукт "${product.name}" зарезервирован.\n` +
-                    `Отправьте ${transaction.btc_amount} BTC на адрес: ${process.env.BTC_ADDRESS}\n` +
-                    `После оплаты нажмите "Проверить оплату"`,
-                {
-                    reply_markup: {
-                        inline_keyboard: [
-                            [
-                                {
-                                    text: "Проверить оплату",
-                                    callback_data: `check_${transaction._id}`,
-                                },
-                            ],
-                            // В случае отмены возвращение к городу
-                            // [
-                            //     {
-                            //         text: "❌ Назад",
-                            //         callback_data: `city_${cityId}`,
-                            //     },
-                            // ],
-                        ],
-                    },
-                }
+        if (!product) {
+            return await ctx.answerCallbackQuery(
+                "Товар уже зарезервирован или недоступен, попробуйте выбрать другой"
             );
         }
-    }
 
+        return await ctx.editMessageText(
+            `📦 Товар: "${product.name}"\n` +
+                `💸 Цена: ${product.rub_price} RUB`,
+            {
+                reply_markup: {
+                    inline_keyboard: [
+                        [
+                            {
+                                text: "🛒 Купить",
+                                callback_data: `purchase_${product.name}`,
+                            },
+                        ],
+
+                        // В случае отмены возвращение к городу
+                        [
+                            {
+                                text: "❌ Назад",
+                                callback_data: `city_${cityId}`,
+                            },
+                        ],
+                    ],
+                },
+            }
+        );
+    } else if (data.startsWith("purchase_")) {
+        const configData = await Configuration.findOne();
+        const cityId = ctx.session.cityId;
+        const productName = data.split("_")[1];
+        const product = await Product.findOne({
+            name: productName,
+            status: "available",
+            city_id: cityId,
+        });
+        const tgUserId = ctx.callbackQuery.from.id;
+        const userReservedPurchases = await Transaction.findOne({
+            customer_tg_id: tgUserId,
+            status: "pending",
+        });
+        console.log(userReservedPurchases)
+        if(userReservedPurchases) {
+            return await ctx.answerCallbackQuery(
+                "У вас есть активные заказы.\n" + "Чтобы купить товар, оплатите или отмените предыдущий заказ"
+            );
+        }
+        if (!product || !configData) {
+            return await ctx.answerCallbackQuery(
+                "Товар уже зарезервирован или недоступен, попробуйте выбрать другой"
+            );
+        }
+        console.log(product.id);
+        session.productId = product.id;
+        product.status = "reserved";
+        product.reserved_at = new Date();
+        await product.save();
+
+        const transaction = new Transaction({
+            customer_tg_id: ctx.from.id,
+            product_id: product._id,
+            btc_amount: generateUniqueAmount(product.btc_price),
+            status: "pending",
+        });
+        await transaction.save();
+
+        await ctx.reply(
+            `📅 Товар "${product.name}" зарезервирован.\n` +
+                `Отправьте ${transaction.btc_amount} BTC на адрес: ${configData.btcAddress}\n` +
+                `После оплаты нажмите "Проверить оплату"\n` +
+                `Текущий заказ и ваши покупки вы можете найти во вкладке "🛍️ Мои покупки" в главном меню`,
+            {
+                reply_markup: {
+                    inline_keyboard: [
+                        [
+                            {
+                                text: "🔍 Проверить оплату",
+                                callback_data: `check_${transaction._id}`,
+                            },
+                        ],
+                        // В случае отмены возвращение к городу
+                        [
+                            {
+                                text: "❌ Отменить покупку",
+                                callback_data: `cancel_${transaction._id}`,
+                            },
+                        ],
+                    ],
+                },
+            }
+        );
+
+        return await ctx.answerCallbackQuery();
+    } else if (data.startsWith("cancel_")) {
+        const transactionId = data.split("_")[1];
+        const productId = ctx.session.productId;
+        await Transaction.deleteOne(
+            { _id: transactionId }
+        );
+        console.log("Транзакция отменена");
+        await Product.updateOne(
+            { _id: productId },
+            { status: "available", reserved_at: null }
+        );
+        console.log("Товар восстановлен");
+
+        await ctx.deleteMessage();
+    }
     // Проверка оплаты (заглушка)
     else if (data.startsWith("check_")) {
         const cityId = ctx.session.cityId;
@@ -401,7 +493,8 @@ bot.on("callback_query:data", async (ctx) => {
                     await product.save();
                     session.productId = null;
                     await ctx.editMessageText(
-                        `Спасибо! Ваш продукт: ${product.data}`,
+                        `🎉 Спасибо за покупку!\n` +
+                            `💎 Ваш товар: ${product.data}`,
                         {
                             reply_markup: {
                                 inline_keyboard: [
@@ -422,58 +515,11 @@ bot.on("callback_query:data", async (ctx) => {
         }
     }
 
-    // Назад к городам
-    // else if (data === "back_city") {
-    //     session.step = "city";
-    //     const cities = await City.find();
-    //     const keyboard = new InlineKeyboard();
-    //     cities.forEach((city) => {
-    //         keyboard.text(city.name, `city_${city._id}`);
-    //     });
-    //     keyboard.row().text("❌ Отмена", "cancel");
-    //     return await ctx.editMessageText("Выберите город:", {
-    //         reply_markup: keyboard,
-    //     });
-    // }
-
-    // Отмена
+    // Отмена, возвращение в меню
     else if (data === "menu") {
-        // if (session.productId) {
-        //     const product = await Product.findById(session.productId);
-        //     if (product && product.status === "reserved") {
-        //         product.status = "available";
-        //         product.reserved_at = null;
-        //         await product.save();
-        //         await Transaction.deleteOne({ product_id: product._id, status: "pending" });
-        //     }
-        // }
         return await sendMainMenu(ctx, "edit");
-    } else if (data === "feedback") {
-        return ctx.editMessageText(`Тут скоро будут отзывы`, {
-            reply_markup: {
-                inline_keyboard: [
-                    [
-                        {
-                            text: "❌ Назад",
-                            callback_data: `menu`,
-                        },
-                    ],
-                ],
-            },
-        });
-    } else if (data === "support") {
-        return ctx.editMessageText(`Тут будет поддержка`, {
-            reply_markup: {
-                inline_keyboard: [
-                    [
-                        {
-                            text: "❌ Назад",
-                            callback_data: `menu`,
-                        },
-                    ],
-                ],
-            },
-        });
+
+        // Если пользователь нажал на кнопку "Админ-панель"
     } else if (data === "admin_panel") {
         return ctx.editMessageText(`Секрет =)`, {
             reply_markup: {
@@ -487,6 +533,8 @@ bot.on("callback_query:data", async (ctx) => {
                 ],
             },
         });
+
+        // Если пользователь нажал на кнопку "Мои покупки"
     } else if (data === "purchases") {
         const tgUserId = ctx.callbackQuery.from.id;
         const purchases = await Transaction.find({
@@ -495,20 +543,8 @@ bot.on("callback_query:data", async (ctx) => {
         });
 
         if (purchases.length === 0) {
-            return ctx.editMessageText(
-                `Вы еще не совершали покупок в нашем магазине`,
-                {
-                    reply_markup: {
-                        inline_keyboard: [
-                            [
-                                {
-                                    text: "❌ Назад",
-                                    callback_data: `menu`,
-                                },
-                            ],
-                        ],
-                    },
-                }
+            return await ctx.answerCallbackQuery(
+                "Вы еще не совершали покупок в нашем магазине"
             );
         }
 
@@ -519,37 +555,30 @@ bot.on("callback_query:data", async (ctx) => {
                 _id: productId,
                 status: "sold",
             });
+
             if (product) {
-                purchasesKeyboard.text(
-                    product.name,
-                    `purchased_${product._id}`
-                );
+                purchasesKeyboard
+                    .text(`✅ ${product.name}`, `purchased_${product._id}`)
+                    .row();
             }
         }
         purchasesKeyboard.row();
         purchasesKeyboard.text("❌ Назад", `menu`);
-        return ctx.editMessageText(`Ваши покупки:`, {
+        return ctx.editMessageText(`🛒 Ваши покупки:`, {
             reply_markup: purchasesKeyboard,
         });
+
+        // Если пользователь выбрал товар в своих покупках
     } else if (data.startsWith("purchased_")) {
         const productId = data.split("_")[1];
         const product = await Product.findById(productId);
 
         if (!product) {
-            return ctx.editMessageText(`Товар не найден`, {
-                reply_markup: {
-                    inline_keyboard: [
-                        [
-                            {
-                                text: "❌ Назад",
-                                callback_data: `menu`,
-                            },
-                        ],
-                    ],
-                },
-            });
+            return ctx.answerCallbackQuery(
+                "Товар не найден. Возможно, стоит попробовать позже"
+            );
         }
-        return ctx.editMessageText(`Ваш товар: ${product.data}`, {
+        return ctx.editMessageText(`💎 Ваш товар: ${product.data}`, {
             reply_markup: {
                 inline_keyboard: [
                     [
@@ -561,10 +590,7 @@ bot.on("callback_query:data", async (ctx) => {
                 ],
             },
         });
-
     }
-
-    await ctx.answerCallbackQuery();
 });
 
 async function sendMainMenu(
@@ -578,10 +604,10 @@ async function sendMainMenu(
     const menuKeyboard = new InlineKeyboard()
         .text("🛍️ Мои покупки", "purchases")
         .text("🛒 Товары", "cities")
-        .text("⭐️ Отзывы", "feedback")
+        .text("⚙️ Админ-панель", "admin_panel")
         .row()
-        .text("💬 Поддержка", "support")
-        .text("⚙️ Админ-панель", "admin_panel");
+        .url("⭐️ Отзывы", "https://example.com")
+        .url("💬 Поддержка", "https://example.com");
 
     if (option === "edit") {
         return await ctx.editMessageText(
@@ -604,7 +630,7 @@ bot.on("message", async (ctx) => {
 
 // Обработка ошибок
 bot.catch((err) => {
-    console.error("Error in bot:", err);
+    console.error("Произошла ошибка в боте: ", err);
 });
 
 // Запуск бота
