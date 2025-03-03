@@ -1,11 +1,10 @@
 interface SessionData {
     step: string;
     cityId: string | null;
-    categoryId: string | null;
     productId: string | null;
-    isAdmin?: boolean;
-    adminStep?: string; 
-    tempProduct?: { name?: string; price?: number; cityId?: string };
+    isAdmin: boolean | null;
+    adminStep: string | null; 
+    tempProduct: { name?: string; price?: number; cityId?: string } | null;
 }
 
 export default SessionData;

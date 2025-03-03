@@ -4,8 +4,6 @@ import { connectToDatabase } from "../database/index";
 import { cancelExpiredTransactions, generateUniqueAmount } from "./helpers";
 import cron from "node-cron";
 import { ExtendedContext, SessionData } from "./types";
-import { config } from "dotenv";
-import { brotliCompress } from "zlib";
 
 if (!process.env.TG_BOT_TOKEN) {
     throw new Error("Telegram bot токен не найден");
@@ -281,7 +279,7 @@ async function addRecords() {
             });
         }
     } catch (e) {
-        console.error("Error during initialization:", e);
+        console.error("Не удалось создать тестовые записи:", e);
     }
 }
 
@@ -293,8 +291,10 @@ bot.use(
         initial: (): SessionData => ({
             step: "start",
             cityId: null,
-            categoryId: null,
             productId: null,
+            isAdmin: null,
+            adminStep: null,
+            tempProduct: null
         }),
     })
 );
@@ -311,8 +311,6 @@ bot.on("callback_query:data", async (ctx) => {
 
     // Если пользователь нажал на кнопку "Товары"
     if (data === "cities") {
-        session.step = "city";
-
         const cities = await City.find();
         const cityKeyboard = new InlineKeyboard();
         cities.forEach((city) => {
@@ -327,7 +325,6 @@ bot.on("callback_query:data", async (ctx) => {
     } else if (data.startsWith("city_")) {
         const cityId = data.split("_")[1];
         session.cityId = cityId;
-        session.step = "product";
 
         // Уникальные названия товаров
         const uniqueProductNames = await Product.distinct("name", {
@@ -356,7 +353,7 @@ bot.on("callback_query:data", async (ctx) => {
 
     // Если пользователь выбрал товар
     else if (data.startsWith("product_")) {
-        const cityId = ctx.session.cityId;
+        const cityId = session.cityId;
         const productName = data.split("_")[1];
         const product = await Product.findOne({
             name: productName,
@@ -396,7 +393,7 @@ bot.on("callback_query:data", async (ctx) => {
         );
     } else if (data.startsWith("purchase_")) {
         const configData = await Configuration.findOne();
-        const cityId = ctx.session.cityId;
+        const cityId = session.cityId;
         const productName = data.split("_")[1];
         const product = await Product.findOne({
             name: productName,
@@ -408,10 +405,11 @@ bot.on("callback_query:data", async (ctx) => {
             customer_tg_id: tgUserId,
             status: "pending",
         });
-        console.log(userReservedPurchases)
-        if(userReservedPurchases) {
+
+        if (userReservedPurchases) {
             return await ctx.answerCallbackQuery(
-                "У вас есть активные заказы.\n" + "Чтобы купить товар, оплатите или отмените предыдущий заказ"
+                "У вас есть активные заказы.\n" +
+                    "Чтобы купить товар, оплатите или отмените предыдущий заказ"
             );
         }
         if (!product || !configData) {
@@ -419,7 +417,7 @@ bot.on("callback_query:data", async (ctx) => {
                 "Товар уже зарезервирован или недоступен, попробуйте выбрать другой"
             );
         }
-        console.log(product.id);
+
         session.productId = product.id;
         product.status = "reserved";
         product.reserved_at = new Date();
@@ -462,10 +460,8 @@ bot.on("callback_query:data", async (ctx) => {
         return await ctx.answerCallbackQuery();
     } else if (data.startsWith("cancel_")) {
         const transactionId = data.split("_")[1];
-        const productId = ctx.session.productId;
-        await Transaction.deleteOne(
-            { _id: transactionId }
-        );
+        const productId = session.productId;
+        await Transaction.deleteOne({ _id: transactionId });
         console.log("Транзакция отменена");
         await Product.updateOne(
             { _id: productId },
@@ -477,7 +473,7 @@ bot.on("callback_query:data", async (ctx) => {
     }
     // Проверка оплаты (заглушка)
     else if (data.startsWith("check_")) {
-        const cityId = ctx.session.cityId;
+        const cityId = session.cityId;
         const transactionId = data.split("_")[1];
         const transaction = await Transaction.findById(transactionId);
         if (transaction && transaction.status === "pending" && cityId) {
@@ -518,21 +514,6 @@ bot.on("callback_query:data", async (ctx) => {
     // Отмена, возвращение в меню
     else if (data === "menu") {
         return await sendMainMenu(ctx, "edit");
-
-        // Если пользователь нажал на кнопку "Админ-панель"
-    } else if (data === "admin_panel") {
-        return ctx.editMessageText(`Секрет =)`, {
-            reply_markup: {
-                inline_keyboard: [
-                    [
-                        {
-                            text: "❌ Назад",
-                            callback_data: `menu`,
-                        },
-                    ],
-                ],
-            },
-        });
 
         // Если пользователь нажал на кнопку "Мои покупки"
     } else if (data === "purchases") {
@@ -590,8 +571,71 @@ bot.on("callback_query:data", async (ctx) => {
                 ],
             },
         });
+    } else if (data === "admin_panel") {
+        if (!session.isAdmin) {
+            
+            session.adminStep = "password_input";
+            return await ctx.editMessageText("Введите ключ доступа ниже");
+        }
+
+        return await sendAdminMenu(ctx, "edit");
     }
 });
+
+bot.on("message", async (ctx) => {
+    const session = ctx.session;
+
+    if (session.adminStep === "password_input") {
+        const inputedPassword = ctx.message.text;
+        const isPasswordValid = await Configuration.findOne({adminPassword: inputedPassword});
+
+        if (isPasswordValid) {
+            session.isAdmin = true;
+            return await sendAdminMenu(ctx);
+        }
+
+        return await ctx.reply(`❌ Неверный ключ доступа`, {
+            reply_markup: {
+                inline_keyboard: [
+                    [
+                        {
+                            text: "❌ Назад",
+                            callback_data: `menu`,
+                        },
+                    ],
+                ],
+            },
+        });
+    }
+    return await ctx.reply(
+        "Не понял вашей команды. Чтобы открыть меню навигации введите /start"
+    );
+});
+
+async function sendAdminMenu(
+    ctx: ExtendedContext,
+    option: "create" | "edit" = "create"
+) {
+    const session = ctx.session;
+    session.adminStep = "admin_menu";
+    const botMessage =
+        "✨ Ниже представлены разделы с которыми вы можете взаимодейстовать. Выберите один из них";
+
+    const adminMenuKeyboard = new InlineKeyboard()
+        .text("🛍️ Товары", "admin_products")
+        .text("🏙️ Города", "admin_cities")
+        .row()
+        .text("⚙️ Конфигурация", "admin_config")
+        .text("🏠 Главное меню", "menu")
+
+    if (option === "edit") {
+        return await ctx.editMessageText(botMessage, {
+            reply_markup: adminMenuKeyboard,
+        });
+    }
+
+    return await ctx.reply(botMessage, { reply_markup: adminMenuKeyboard });
+}
 
 async function sendMainMenu(
     ctx: ExtendedContext,
@@ -601,6 +645,8 @@ async function sendMainMenu(
     session.step = "start";
     session.cityId = null;
     session.productId = null;
+    const botMessage =
+        "✨ Добро пожаловать в наш магазин! ✨\n\nЗдесь вы найдёте всё необходимое. Используйте меню ниже, чтобы выбрать интересующий вас раздел 😊";
     const menuKeyboard = new InlineKeyboard()
         .text("🛍️ Мои покупки", "purchases")
         .text("🛒 Товары", "cities")
@@ -610,23 +656,13 @@ async function sendMainMenu(
         .url("💬 Поддержка", "https://example.com");
 
     if (option === "edit") {
-        return await ctx.editMessageText(
-            "✨ Добро пожаловать в наш магазин! ✨\n\nЗдесь вы найдёте всё необходимое. Используйте меню ниже, чтобы выбрать интересующий вас раздел 😊",
-            { reply_markup: menuKeyboard }
-        );
+        return await ctx.editMessageText(botMessage, {
+            reply_markup: menuKeyboard,
+        });
     }
 
-    return await ctx.reply(
-        "✨ Добро пожаловать в наш магазин! ✨\n\nЗдесь вы найдёте всё необходимое. Используйте меню ниже, чтобы выбрать интересующий вас раздел 😊",
-        { reply_markup: menuKeyboard }
-    );
+    return await ctx.reply(botMessage, { reply_markup: menuKeyboard });
 }
-
-bot.on("message", async (ctx) => {
-    await ctx.reply(
-        "Не понял вашей команды. Чтобы открыть меню навигации введите /start"
-    );
-});
 
 // Обработка ошибок
 bot.catch((err) => {
@@ -634,5 +670,4 @@ bot.catch((err) => {
 });
 
 // Запуск бота
-// addRecords();
 bot.start();
