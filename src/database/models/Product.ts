@@ -32,10 +32,12 @@ const ProductSchema = new Schema({
         required: true,
     },
     reserved_at: {
-        type: Date,
+        type: Date || null,
+        default: null,
     },
     sold_at: {
-        type: Date,
+        type: Date || null,
+        default: null,
     }
 });
 
