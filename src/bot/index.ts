@@ -1,10 +1,11 @@
 import { Bot, InlineKeyboard, session } from "grammy";
 import { City, Product, Transaction, Configuration } from "../database/models";
 import { connectToDatabase } from "../database/index";
-import { cancelExpiredTransactions, generateUniqueAmount } from "./helpers";
+import { cancelExpiredTransactions, generateUniqueAmount, getUniqueProducts } from "./helpers";
 import cron from "node-cron";
 import { ExtendedContext, SessionData } from "./types";
 import axios from "axios";
+import mongoose from "mongoose";
 
 if (!process.env.TG_BOT_TOKEN) {
     throw new Error("Telegram bot токен не найден");
@@ -281,6 +282,7 @@ bot.use(
             step: "start",
             cityId: null,
             productId: null,
+            botLastMessageId: null,
             isAdmin: null,
             adminStep: null,
             tempProduct: null,
@@ -307,7 +309,7 @@ bot.on("callback_query:data", async (ctx) => {
                 { parse_mode: "HTML" }
             );
         }
-    
+
         const cityKeyboard = new InlineKeyboard();
         cities.forEach((city, index) => {
             // Добавляем кнопку с названием города и его ID
@@ -319,7 +321,7 @@ bot.on("callback_query:data", async (ctx) => {
         });
         // Кнопка "Назад" в отдельной строке
         cityKeyboard.row().text("❌ Назад", "menu");
-    
+
         await ctx.editMessageText("<b>🌆 Выберите город:</b>", {
             reply_markup: cityKeyboard,
             parse_mode: "HTML",
@@ -329,27 +331,23 @@ bot.on("callback_query:data", async (ctx) => {
         session.cityId = cityId;
 
         // Уникальные названия товаров
-        const uniqueProductNames = await Product.distinct("name", {
-            city_id: cityId,
-            status: "available",
-        });
+        const uniqueProducts = await getUniqueProducts(cityId);
 
-        const uniqueProductNamesKeyboard = new InlineKeyboard();
-
-        if (uniqueProductNames.length === 0) {
+        if (uniqueProducts.length === 0) {
             return await ctx.answerCallbackQuery(
                 "В этом городе нет доступных товаров"
             );
         }
+        const uniqueProductsKeyboard = new InlineKeyboard();
 
-        uniqueProductNames.forEach((product) => {
-            uniqueProductNamesKeyboard
-                .text(`📦 ${product}`, `product_${product}`)
+        uniqueProducts.forEach((product) => {
+            uniqueProductsKeyboard
+                .text(`📦 ${product.name} (${product.rub_price} RUB)`, `product_${product.name}_${product.rub_price}`)
                 .row();
         });
-        uniqueProductNamesKeyboard.row().text("❌ Назад", "cities");
+        uniqueProductsKeyboard.row().text("❌ Назад", "cities");
         return await ctx.editMessageText("<b>🛒 Выберите товар:</b>", {
-            reply_markup: uniqueProductNamesKeyboard,
+            reply_markup: uniqueProductsKeyboard,
             parse_mode: "HTML",
         });
     }
@@ -358,8 +356,11 @@ bot.on("callback_query:data", async (ctx) => {
     else if (data.startsWith("product_")) {
         const cityId = session.cityId;
         const productName = data.split("_")[1];
+        const productRubPrice = data.split("_")[2];
+
         const product = await Product.findOne({
             name: productName,
+            rub_price: productRubPrice,
             status: "available",
             city_id: cityId,
         });
@@ -480,7 +481,7 @@ bot.on("callback_query:data", async (ctx) => {
         const transaction = await Transaction.findById(transactionId);
         if (transaction && transaction.status === "pending" && cityId) {
             // const { paid, tx_hash } = await checkPayment(
-                    // transaction.created_at,
+            // transaction.created_at,
             //     transaction.btc_amount
             // );
             const paid = true;
@@ -586,9 +587,22 @@ bot.on("callback_query:data", async (ctx) => {
     } else if (data === "admin_panel") {
         if (!session.isAdmin) {
             session.adminStep = "password_input";
+
             return await ctx.editMessageText(
                 "🔑 <b>Введите ключ доступа ниже</b>",
-                { parse_mode: "HTML" }
+                {
+                    reply_markup: {
+                        inline_keyboard: [
+                            [
+                                {
+                                    text: "❌ Назад",
+                                    callback_data: `menu`,
+                                },
+                            ],
+                        ],
+                    },
+                    parse_mode: "HTML",
+                }
             );
         }
 
@@ -601,9 +615,17 @@ bot.on("message", async (ctx) => {
 
     if (session.adminStep === "password_input") {
         const inputedPassword = ctx.message.text;
-        const isPasswordValid = await Configuration.findOne({
+        const isPasswordValid = (await Configuration.findOne({
             adminPassword: inputedPassword,
-        });
+        }))
+            ? true
+            : false;
+
+        if (session.botLastMessageId) {
+            ctx.deleteMessage();
+            ctx.api.deleteMessage(ctx.chat.id, session.botLastMessageId);
+            session.botLastMessageId = null;
+        }
 
         if (isPasswordValid) {
             session.isAdmin = true;
@@ -640,7 +662,6 @@ async function sendAdminMenu(
     session.adminStep = "admin_menu";
     const botMessage = `
 <b>✨ Админ-панель</b>
-
 Ниже представлены разделы, с которыми вы можете взаимодействовать. Выберите один из них:
     `;
     const adminMenuKeyboard = new InlineKeyboard()
@@ -691,10 +712,14 @@ async function sendMainMenu(
         });
     }
 
-    return await ctx.reply(botMessage, {
-        reply_markup: menuKeyboard,
-        parse_mode: "HTML",
-    });
+    const sendedMessageId = await ctx
+        .reply(botMessage, {
+            reply_markup: menuKeyboard,
+            parse_mode: "HTML",
+        })
+        .then((message) => message.message_id);
+    ctx.session.botLastMessageId = sendedMessageId;
+    return sendedMessageId;
 }
 
 // Обработка ошибок
