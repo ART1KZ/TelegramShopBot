@@ -4,6 +4,7 @@ import { connectToDatabase } from "../database/index";
 import { cancelExpiredTransactions, generateUniqueAmount } from "./helpers";
 import cron from "node-cron";
 import { ExtendedContext, SessionData } from "./types";
+import axios from "axios";
 
 if (!process.env.TG_BOT_TOKEN) {
     throw new Error("Telegram bot токен не найден");
@@ -28,9 +29,13 @@ async function addRecords() {
         // Создаем города, если их еще нет
         const cities = await City.find();
         if (cities.length === 0) {
-            await City.create({ name: "Сургут" });
+            await City.create({ name: "Токио" });
+            await City.create({ name: "Лондон" });
+            await City.create({ name: "Нью-Йорк" });
+            await City.create({ name: "Берлин" });
+            await City.create({ name: "Сидней" });
             await City.create({ name: "Москва" });
-            await City.create({ name: "Казань" });
+            await City.create({ name: "Сингапур" });
         }
 
         const citiesIds = (await City.find()).map((city) => city.id);
@@ -38,235 +43,179 @@ async function addRecords() {
         const products = await Product.find();
         if (products.length === 0) {
             await Product.create({
-                name: "Аккаунт CS2",
+                name: "Подписка Netflix 1 месяц",
                 city_id: citiesIds[0],
-                data: "логин пароль222",
-                btc_price: 0.00909043132,
-                rub_price: 44,
+                data: "NETFLIX-12345-XYZ",
+                btc_price: 0.0005,
+                rub_price: 1200,
             });
             await Product.create({
-                name: "Аккаунт Brawl",
+                name: "Лицензия Adobe Photoshop",
                 city_id: citiesIds[1],
-                data: "логин пароль222",
-                btc_price: 0.0800043132,
-                rub_price: 33,
+                data: "ADOBE-PS-98765",
+                btc_price: 0.015,
+                rub_price: 4500,
             });
             await Product.create({
-                name: "Аккаунт DBD",
+                name: "Ключ Steam $50",
                 city_id: citiesIds[2],
-                data: "логин пароль222",
-                btc_price: 0.0770043132,
-                rub_price: 22,
+                data: "STEAM-50USD-ABCDE",
+                btc_price: 0.002,
+                rub_price: 4800,
             });
             await Product.create({
-                name: "Аккаунт LOL",
+                name: "Подписка Spotify Premium",
+                city_id: citiesIds[3],
+                data: "SPOTIFY-3M-54321",
+                btc_price: 0.0004,
+                rub_price: 900,
+            });
+            await Product.create({
+                name: "Цифровой код PlayStation Plus",
+                city_id: citiesIds[4],
+                data: "PSPLUS-12M-XYZ123",
+                btc_price: 0.0018,
+                rub_price: 3600,
+            });
+            await Product.create({
+                name: "Ключ активации Windows 11 Pro",
+                city_id: citiesIds[5],
+                data: "WIN11-PRO-7890-ABC",
+                btc_price: 0.003,
+                rub_price: 7500,
+            });
+            await Product.create({
+                name: "Подписка Xbox Game Pass",
+                city_id: citiesIds[6],
+                data: "XBOX-GP-6M-45678",
+                btc_price: 0.0012,
+                rub_price: 2400,
+            });
+            await Product.create({
+                name: "Цифровой код Amazon $25",
                 city_id: citiesIds[0],
-                data: "логин пароль222",
-                btc_price: 0.066043132,
-                rub_price: 11,
+                data: "AMAZON-25USD-DEF456",
+                btc_price: 0.001,
+                rub_price: 2300,
             });
             await Product.create({
-                name: "Аккаунт Blocksstrke",
+                name: "Ключ VPN NordVPN 1 год",
                 city_id: citiesIds[1],
-                data: "логин пароль222",
-                btc_price: 0.0055043132,
-                rub_price: 66,
+                data: "NORDVPN-1Y-123XYZ",
+                btc_price: 0.0025,
+                rub_price: 6000,
             });
             await Product.create({
-                name: "Аккаунт NBA2022",
+                name: "Подписка YouTube Premium",
                 city_id: citiesIds[2],
-                data: "логин пароль222",
-                btc_price: 0.0044043132,
-                rub_price: 55,
+                data: "YT-PREM-3M-ABC789",
+                btc_price: 0.0006,
+                rub_price: 1500,
             });
             await Product.create({
-                name: "Аккаунт FIFA",
+                name: "Лицензия Microsoft Office 365",
+                city_id: citiesIds[3],
+                data: "OFFICE-365-1Y-XYZ987",
+                btc_price: 0.0028,
+                rub_price: 7000,
+            });
+            await Product.create({
+                name: "Код Roblox 1000 Robux",
+                city_id: citiesIds[4],
+                data: "ROBLOX-1000R-DEF123",
+                btc_price: 0.00045,
+                rub_price: 1000,
+            });
+            await Product.create({
+                name: "Подписка Discord Nitro",
+                city_id: citiesIds[5],
+                data: "DISCORD-NITRO-1M-456XYZ",
+                btc_price: 0.00035,
+                rub_price: 800,
+            });
+            await Product.create({
+                name: "Ключ активации Kaspersky",
+                city_id: citiesIds[6],
+                data: "KASPERSKY-1Y-789ABC",
+                btc_price: 0.0015,
+                rub_price: 3000,
+            });
+            await Product.create({
+                name: "Цифровой код Google Play $10",
                 city_id: citiesIds[0],
-                data: "логин пароль222",
-                btc_price: 0.0002243132,
-                rub_price: 44,
+                data: "GOOGLE-PLAY-10USD-XYZ456",
+                btc_price: 0.0004,
+                rub_price: 950,
             });
             await Product.create({
-                name: "Аккаунт Dota 2",
+                name: "Ключ активации ESET NOD32",
                 city_id: citiesIds[1],
-                data: "логин пароль222",
-                btc_price: 0.0004043132,
-                rub_price: 99,
+                data: "ESET-NOD32-1Y-ABC123",
+                btc_price: 0.0013,
+                rub_price: 2800,
             });
             await Product.create({
-                name: "Аккаунт CS2",
-                city_id: citiesIds[0],
-                data: "логин пароль222",
-                btc_price: 0.00909043132,
-                rub_price: 44,
-            });
-            await Product.create({
-                name: "Аккаунт Brawl",
-                city_id: citiesIds[1],
-                data: "логин пароль222",
-                btc_price: 0.0800043132,
-                rub_price: 33,
-            });
-            await Product.create({
-                name: "Аккаунт DBD",
+                name: "Подписка Apple Music 3 месяца",
                 city_id: citiesIds[2],
-                data: "логин пароль222",
-                btc_price: 0.0770043132,
-                rub_price: 22,
+                data: "APPLE-MUSIC-3M-DEF789",
+                btc_price: 0.0007,
+                rub_price: 1600,
             });
             await Product.create({
-                name: "Аккаунт LOL",
+                name: "Код Fortnite 2800 V-Bucks",
+                city_id: citiesIds[3],
+                data: "FORTNITE-2800VB-XYZ456",
+                btc_price: 0.0011,
+                rub_price: 2500,
+            });
+            await Product.create({
+                name: "Лицензия CorelDRAW",
+                city_id: citiesIds[4],
+                data: "COREL-DRAW-2023-ABC987",
+                btc_price: 0.012,
+                rub_price: 4000,
+            });
+            await Product.create({
+                name: "Подписка Twitch Turbo",
+                city_id: citiesIds[5],
+                data: "TWITCH-TURBO-1M-DEF123",
+                btc_price: 0.0003,
+                rub_price: 700,
+            });
+            await Product.create({
+                name: "Ключ akтивации Autodesk AutoCAD",
+                city_id: citiesIds[6],
+                data: "AUTOCAD-2023-XYZ789",
+                btc_price: 0.025,
+                rub_price: 9000,
+            });
+            await Product.create({
+                name: "Цифровой код iTunes $15",
                 city_id: citiesIds[0],
-                data: "логин пароль222",
-                btc_price: 0.066043132,
-                rub_price: 11,
+                data: "ITUNES-15USD-ABC456",
+                btc_price: 0.0006,
+                rub_price: 1400,
             });
             await Product.create({
-                name: "Аккаунт Blocksstrke",
+                name: "Подписка Paramount+ 1 месяц",
                 city_id: citiesIds[1],
-                data: "логин пароль222",
-                btc_price: 0.0055043132,
-                rub_price: 66,
+                data: "PARAMOUNT-1M-DEF789",
+                btc_price: 0.00045,
+                rub_price: 1100,
             });
             await Product.create({
-                name: "Аккаунт NBA2022",
+                name: "Ключ VPN ExpressVPN 6 месяцев",
                 city_id: citiesIds[2],
-                data: "логин пароль222",
-                btc_price: 0.0044043132,
-                rub_price: 55,
+                data: "EXPRESSVPN-6M-XYZ123",
+                btc_price: 0.002,
+                rub_price: 4800,
             });
             await Product.create({
-                name: "Аккаунт FIFA",
-                city_id: citiesIds[0],
-                data: "логин пароль222",
-                btc_price: 0.0002243132,
-                rub_price: 44,
-            });
-            await Product.create({
-                name: "Аккаунт Dota 2",
-                city_id: citiesIds[1],
-                data: "логин пароль222",
-                btc_price: 0.0004043132,
-                rub_price: 99,
-            });
-            await Product.create({
-                name: "Аккаунт CS2",
-                city_id: citiesIds[0],
-                data: "логин пароль222",
-                btc_price: 0.00909043132,
-                rub_price: 44,
-            });
-            await Product.create({
-                name: "Аккаунт Brawl",
-                city_id: citiesIds[1],
-                data: "логин пароль222",
-                btc_price: 0.0800043132,
-                rub_price: 33,
-            });
-            await Product.create({
-                name: "Аккаунт DBD",
-                city_id: citiesIds[2],
-                data: "логин пароль222",
-                btc_price: 0.0770043132,
-                rub_price: 22,
-            });
-            await Product.create({
-                name: "Аккаунт LOL",
-                city_id: citiesIds[0],
-                data: "логин пароль222",
-                btc_price: 0.066043132,
-                rub_price: 11,
-            });
-            await Product.create({
-                name: "Аккаунт Blocksstrke",
-                city_id: citiesIds[1],
-                data: "логин пароль222",
-                btc_price: 0.0055043132,
-                rub_price: 66,
-            });
-            await Product.create({
-                name: "Аккаунт NBA2022",
-                city_id: citiesIds[2],
-                data: "логин пароль222",
-                btc_price: 0.0044043132,
-                rub_price: 55,
-            });
-            await Product.create({
-                name: "Аккаунт FIFA",
-                city_id: citiesIds[0],
-                data: "логин пароль222",
-                btc_price: 0.0002243132,
-                rub_price: 44,
-            });
-            await Product.create({
-                name: "Аккаунт Dota 2",
-                city_id: citiesIds[1],
-                data: "логин пароль222",
-                btc_price: 0.0004043132,
-                rub_price: 99,
-            });
-            await Product.create({
-                name: "Аккаунт CS2",
-                city_id: citiesIds[0],
-                data: "логин пароль222",
-                btc_price: 0.00909043132,
-                rub_price: 44,
-            });
-            await Product.create({
-                name: "Аккаунт Brawl",
-                city_id: citiesIds[1],
-                data: "логин пароль222",
-                btc_price: 0.0800043132,
-                rub_price: 33,
-            });
-            await Product.create({
-                name: "Аккаунт DBD",
-                city_id: citiesIds[2],
-                data: "логин пароль222",
-                btc_price: 0.0770043132,
-                rub_price: 22,
-            });
-            await Product.create({
-                name: "Аккаунт LOL",
-                city_id: citiesIds[0],
-                data: "логин пароль222",
-                btc_price: 0.066043132,
-                rub_price: 11,
-            });
-            await Product.create({
-                name: "Аккаунт Blocksstrke",
-                city_id: citiesIds[1],
-                data: "логин пароль222",
-                btc_price: 0.0055043132,
-                rub_price: 66,
-            });
-            await Product.create({
-                name: "Аккаунт NBA2022",
-                city_id: citiesIds[2],
-                data: "логин пароль222",
-                btc_price: 0.0044043132,
-                rub_price: 55,
-            });
-            await Product.create({
-                name: "Аккаунт FIFA",
-                city_id: citiesIds[0],
-                data: "логин пароль222",
-                btc_price: 0.0002243132,
-                rub_price: 44,
-            });
-            await Product.create({
-                name: "Аккаунт Dota 2",
-                city_id: citiesIds[1],
-                data: "логин пароль222",
-                btc_price: 0.0004043132,
-                rub_price: 99,
-            });
-            await Product.create({
-                name: "Аккаунт Dota 2",
-                city_id: citiesIds[0],
-                data: "логин пароль222",
-                btc_price: 0.0004043132,
-                rub_price: 99,
+                name: "Код Minecraft Java Edition",
+                city_id: citiesIds[3],
+                data: "MINECRAFT-JAVA-ABC789",
+                btc_price: 0.0014,
+                rub_price: 3200,
             });
         }
 
@@ -285,6 +234,46 @@ async function addRecords() {
 
 addRecords();
 
+// Функция проверки оплаты через BlockCypher
+async function checkPayment(
+    btcAmount: number
+): Promise<{ paid: boolean; tx_hash?: string }> {
+    try {
+        // Запрос к BlockCypher для получения данных об адресе
+        const btcAddress = await Configuration.findOne().then(
+            (config) => config?.btcAddress
+        );
+
+        if (btcAddress) {
+            const response = await axios.get(
+                `https://api.blockcypher.com/v1/btc/main/addrs/${btcAddress}`
+            );
+            const data = response.data;
+
+            // Получаем список транзакций
+            const transactions = data.txrefs || [];
+
+            for (const tx of transactions) {
+                // Сумма в BlockCypher в сатоши (1 BTC = 10^8 сатоши)
+                const txAmount = tx.value / 100000000;
+                console.log(txAmount);
+                // Проверяем сумму и подтверждения
+                if (
+                    Math.abs(txAmount - btcAmount) < 0.00000001 && // Точность до 8 знаков
+                    tx.confirmations >= 1 // Минимум 1 подтверждение
+                ) {
+                    return { paid: true, tx_hash: tx.tx_hash };
+                }
+            }
+        }
+
+        return { paid: false };
+    } catch (error) {
+        console.error("Ошибка проверки оплаты через BlockCypher:", error);
+        return { paid: false };
+    }
+}
+
 // Мидлвара для хранения сессий
 bot.use(
     session({
@@ -294,7 +283,7 @@ bot.use(
             productId: null,
             isAdmin: null,
             adminStep: null,
-            tempProduct: null
+            tempProduct: null,
         }),
     })
 );
@@ -312,16 +301,29 @@ bot.on("callback_query:data", async (ctx) => {
     // Если пользователь нажал на кнопку "Товары"
     if (data === "cities") {
         const cities = await City.find();
+        if (!cities || cities.length === 0) {
+            return await ctx.editMessageText(
+                "<b>❌ Ошибка:</b> Города не найдены в базе данных.",
+                { parse_mode: "HTML" }
+            );
+        }
+    
         const cityKeyboard = new InlineKeyboard();
-        cities.forEach((city) => {
+        cities.forEach((city, index) => {
+            // Добавляем кнопку с названием города и его ID
             cityKeyboard.text(`🏙️ ${city.name}`, `city_${city._id}`);
+            // После каждой второй кнопки (или последней) добавляем перенос строки
+            if ((index + 1) % 2 === 0 || index === cities.length - 1) {
+                cityKeyboard.row();
+            }
         });
+        // Кнопка "Назад" в отдельной строке
         cityKeyboard.row().text("❌ Назад", "menu");
-        await ctx.editMessageText("🌆 Выберите город:", {
+    
+        await ctx.editMessageText("<b>🌆 Выберите город:</b>", {
             reply_markup: cityKeyboard,
+            parse_mode: "HTML",
         });
-
-        // Если пользователь выбрал город (или нажал назад на моменте выбора товара)
     } else if (data.startsWith("city_")) {
         const cityId = data.split("_")[1];
         session.cityId = cityId;
@@ -346,8 +348,9 @@ bot.on("callback_query:data", async (ctx) => {
                 .row();
         });
         uniqueProductNamesKeyboard.row().text("❌ Назад", "cities");
-        return await ctx.editMessageText("🛒 Выберите товар:", {
+        return await ctx.editMessageText("<b>🛒 Выберите товар:</b>", {
             reply_markup: uniqueProductNamesKeyboard,
+            parse_mode: "HTML",
         });
     }
 
@@ -368,8 +371,8 @@ bot.on("callback_query:data", async (ctx) => {
         }
 
         return await ctx.editMessageText(
-            `📦 Товар: "${product.name}"\n` +
-                `💸 Цена: ${product.rub_price} RUB`,
+            `<b>📦 Товар:</b> "${product.name}"\n` +
+                `<b>💸 Цена:</b> ${product.rub_price} RUB`,
             {
                 reply_markup: {
                     inline_keyboard: [
@@ -379,8 +382,6 @@ bot.on("callback_query:data", async (ctx) => {
                                 callback_data: `purchase_${product.name}`,
                             },
                         ],
-
-                        // В случае отмены возвращение к городу
                         [
                             {
                                 text: "❌ Назад",
@@ -389,6 +390,7 @@ bot.on("callback_query:data", async (ctx) => {
                         ],
                     ],
                 },
+                parse_mode: "HTML",
             }
         );
     } else if (data.startsWith("purchase_")) {
@@ -432,10 +434,10 @@ bot.on("callback_query:data", async (ctx) => {
         await transaction.save();
 
         await ctx.reply(
-            `📅 Товар "${product.name}" зарезервирован.\n` +
-                `Отправьте ${transaction.btc_amount} BTC на адрес: ${configData.btcAddress}\n` +
+            `<b>📅 Товар "${product.name}" зарезервирован.</b>\n\n` +
+                `Отправьте <code>${transaction.btc_amount}</code> BTC на адрес: <code>${configData.btcAddress}</code>\n\n` +
                 `После оплаты нажмите "Проверить оплату"\n` +
-                `Текущий заказ и ваши покупки вы можете найти во вкладке "🛍️ Мои покупки" в главном меню`,
+                `Текущий заказ и ваши покупки вы можете найти во вкладке "<i>🛍️ Мои покупки</i>" в главном меню`,
             {
                 reply_markup: {
                     inline_keyboard: [
@@ -445,7 +447,6 @@ bot.on("callback_query:data", async (ctx) => {
                                 callback_data: `check_${transaction._id}`,
                             },
                         ],
-                        // В случае отмены возвращение к городу
                         [
                             {
                                 text: "❌ Отменить покупку",
@@ -454,6 +455,7 @@ bot.on("callback_query:data", async (ctx) => {
                         ],
                     ],
                 },
+                parse_mode: "HTML",
             }
         );
 
@@ -471,15 +473,19 @@ bot.on("callback_query:data", async (ctx) => {
 
         await ctx.deleteMessage();
     }
-    // Проверка оплаты (заглушка)
+    // Проверка оплаты
     else if (data.startsWith("check_")) {
         const cityId = session.cityId;
         const transactionId = data.split("_")[1];
         const transaction = await Transaction.findById(transactionId);
         if (transaction && transaction.status === "pending" && cityId) {
-            // Здесь будет интеграция с Blockchair API позже
-            const paid = true; // Заглушка
+            // const { paid, tx_hash } = await checkPayment(
+                    // transaction.created_at,
+            //     transaction.btc_amount
+            // );
+            const paid = true;
             if (paid) {
+                // transaction.tx_hash = tx_hash;
                 transaction.status = "completed";
                 await transaction.save();
                 const product = await Product.findById(transaction.product_id);
@@ -489,8 +495,8 @@ bot.on("callback_query:data", async (ctx) => {
                     await product.save();
                     session.productId = null;
                     await ctx.editMessageText(
-                        `🎉 Спасибо за покупку!\n` +
-                            `💎 Ваш товар: ${product.data}`,
+                        `<b>🎉 Спасибо за покупку!</b>\n\n` +
+                            `<b>💎 Ваш товар:</b> <code>${product.data}</code>`,
                         {
                             reply_markup: {
                                 inline_keyboard: [
@@ -502,6 +508,7 @@ bot.on("callback_query:data", async (ctx) => {
                                     ],
                                 ],
                             },
+                            parse_mode: "HTML",
                         }
                     );
                 }
@@ -545,8 +552,9 @@ bot.on("callback_query:data", async (ctx) => {
         }
         purchasesKeyboard.row();
         purchasesKeyboard.text("❌ Назад", `menu`);
-        return ctx.editMessageText(`🛒 Ваши покупки:`, {
+        return ctx.editMessageText(`<b>🛒 Ваши покупки:</b>`, {
             reply_markup: purchasesKeyboard,
+            parse_mode: "HTML",
         });
 
         // Если пользователь выбрал товар в своих покупках
@@ -559,23 +567,29 @@ bot.on("callback_query:data", async (ctx) => {
                 "Товар не найден. Возможно, стоит попробовать позже"
             );
         }
-        return ctx.editMessageText(`💎 Ваш товар: ${product.data}`, {
-            reply_markup: {
-                inline_keyboard: [
-                    [
-                        {
-                            text: "❌ Назад",
-                            callback_data: `purchases`,
-                        },
+        return ctx.editMessageText(
+            `<b>💎 Ваш товар:</b> <code>${product.data}</code>`,
+            {
+                reply_markup: {
+                    inline_keyboard: [
+                        [
+                            {
+                                text: "❌ Назад",
+                                callback_data: `purchases`,
+                            },
+                        ],
                     ],
-                ],
-            },
-        });
+                },
+                parse_mode: "HTML",
+            }
+        );
     } else if (data === "admin_panel") {
         if (!session.isAdmin) {
-            
             session.adminStep = "password_input";
-            return await ctx.editMessageText("Введите ключ доступа ниже");
+            return await ctx.editMessageText(
+                "🔑 <b>Введите ключ доступа ниже</b>",
+                { parse_mode: "HTML" }
+            );
         }
 
         return await sendAdminMenu(ctx, "edit");
@@ -587,14 +601,16 @@ bot.on("message", async (ctx) => {
 
     if (session.adminStep === "password_input") {
         const inputedPassword = ctx.message.text;
-        const isPasswordValid = await Configuration.findOne({adminPassword: inputedPassword});
+        const isPasswordValid = await Configuration.findOne({
+            adminPassword: inputedPassword,
+        });
 
         if (isPasswordValid) {
             session.isAdmin = true;
             return await sendAdminMenu(ctx);
         }
 
-        return await ctx.reply(`❌ Неверный ключ доступа`, {
+        return await ctx.reply(`<b>⚠️ Неверный ключ доступа</b>`, {
             reply_markup: {
                 inline_keyboard: [
                     [
@@ -605,10 +621,14 @@ bot.on("message", async (ctx) => {
                     ],
                 ],
             },
+            parse_mode: "HTML",
         });
     }
     return await ctx.reply(
-        "Не понял вашей команды. Чтобы открыть меню навигации введите /start"
+        `<b>❓ Не понял вашей команды</b>\n\nЧтобы открыть меню навигации, введите /start`,
+        {
+            parse_mode: "HTML",
+        }
     );
 });
 
@@ -618,23 +638,29 @@ async function sendAdminMenu(
 ) {
     const session = ctx.session;
     session.adminStep = "admin_menu";
-    const botMessage =
-        "✨ Ниже представлены разделы с которыми вы можете взаимодейстовать. Выберите один из них";
+    const botMessage = `
+<b>✨ Админ-панель</b>
 
+Ниже представлены разделы, с которыми вы можете взаимодействовать. Выберите один из них:
+    `;
     const adminMenuKeyboard = new InlineKeyboard()
         .text("🛍️ Товары", "admin_products")
         .text("🏙️ Города", "admin_cities")
         .row()
         .text("⚙️ Конфигурация", "admin_config")
-        .text("🏠 Главное меню", "menu")
+        .text("🏠 Главное меню", "menu");
 
     if (option === "edit") {
         return await ctx.editMessageText(botMessage, {
             reply_markup: adminMenuKeyboard,
+            parse_mode: "HTML",
         });
     }
 
-    return await ctx.reply(botMessage, { reply_markup: adminMenuKeyboard });
+    return await ctx.reply(botMessage, {
+        reply_markup: adminMenuKeyboard,
+        parse_mode: "HTML",
+    });
 }
 
 async function sendMainMenu(
@@ -645,8 +671,11 @@ async function sendMainMenu(
     session.step = "start";
     session.cityId = null;
     session.productId = null;
-    const botMessage =
-        "✨ Добро пожаловать в наш магазин! ✨\n\nЗдесь вы найдёте всё необходимое. Используйте меню ниже, чтобы выбрать интересующий вас раздел 😊";
+    const botMessage = `
+<b>✨ Добро пожаловать в наш магазин! ✨</b>
+
+Здесь вы найдёте всё необходимое. Используйте меню ниже, чтобы выбрать интересующий вас раздел 
+    `;
     const menuKeyboard = new InlineKeyboard()
         .text("🛍️ Мои покупки", "purchases")
         .text("🛒 Товары", "cities")
@@ -658,10 +687,14 @@ async function sendMainMenu(
     if (option === "edit") {
         return await ctx.editMessageText(botMessage, {
             reply_markup: menuKeyboard,
+            parse_mode: "HTML",
         });
     }
 
-    return await ctx.reply(botMessage, { reply_markup: menuKeyboard });
+    return await ctx.reply(botMessage, {
+        reply_markup: menuKeyboard,
+        parse_mode: "HTML",
+    });
 }
 
 // Обработка ошибок
