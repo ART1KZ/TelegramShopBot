@@ -294,7 +294,10 @@ bot.on("callback_query:data", async (ctx) => {
 
         uniqueProducts.forEach((product) => {
             uniqueProductsKeyboard
-                .text(`📦 ${product.name} (${product.rub_price} RUB)`, `product_${product.name}_${product.rub_price}`)
+                .text(
+                    `📦 ${product.name} (${product.rub_price} RUB)`,
+                    `product_${product.name}_${product.rub_price}`
+                )
                 .row();
         });
         uniqueProductsKeyboard.row().text("❌ Назад", "cities");
@@ -356,12 +359,12 @@ bot.on("callback_query:data", async (ctx) => {
             city_id: cityId,
         });
         const tgUserId = ctx.callbackQuery.from.id;
-        const userReservedPurchases = await Transaction.findOne({
+        const isUserGotReservedPurchases = await Transaction.findOne({
             customer_tg_id: tgUserId,
             status: "pending",
-        });
+        }) ? true : false;
 
-        if (userReservedPurchases) {
+        if (isUserGotReservedPurchases) {
             return await ctx.answerCallbackQuery(
                 "У вас есть активные заказы.\n" +
                     "Чтобы купить товар, оплатите или отмените предыдущий заказ"
@@ -414,17 +417,25 @@ bot.on("callback_query:data", async (ctx) => {
 
         return await ctx.answerCallbackQuery();
     } else if (data.startsWith("cancel_")) {
-        const transactionId = data.split("_")[1];
-        const productId = session.productId;
-        await Transaction.deleteOne({ _id: transactionId });
-        console.log("Транзакция отменена");
-        await Product.updateOne(
-            { _id: productId },
-            { status: "available", reserved_at: null }
-        );
-        console.log("Товар восстановлен");
+        try {
+            const transactionId = data.split("_")[1];
+            const productId = session.productId;
+            await Transaction.updateOne(
+                { _id: transactionId, status: "pending" },
+                { status: "canceled" }
+            );
+            await Product.updateOne(
+                { _id: productId },
+                { status: "available", reserved_at: null }
+            );
 
-        await ctx.deleteMessage();
+            await ctx.deleteMessage();
+        } catch (error) {
+            console.error(
+                "Не удалось отменить транзакцию пользователем:\n\n",
+                error
+            );
+        }
     }
     // Проверка оплаты
     else if (data.startsWith("check_")) {
@@ -607,7 +618,7 @@ bot.on("message", async (ctx) => {
 });
 
 bot.catch((err) => {
-    console.error("Произошла ошибка в боте:\n", err);
+    console.error("Произошла ошибка в боте:\n\n", err);
 });
 
 bot.start();
