@@ -1,11 +1,10 @@
 import { Bot, InlineKeyboard, session } from "grammy";
 import { City, Product, Transaction, Configuration } from "../database/models";
 import { connectToDatabase } from "../database/index";
-import { cancelExpiredTransactions, generateUniqueAmount, getUniqueProducts } from "./helpers";
-import cron from "node-cron";
+import { generateUniqueAmount, getUniqueProducts } from "./helpers";
 import { ExtendedContext, SessionData } from "./types";
-import axios from "axios";
-import mongoose from "mongoose";
+import { sendMainMenu, sendAdminMenu } from "./menus";
+import { scheduleTransactionsCleanup } from "./transations";
 
 if (!process.env.TG_BOT_TOKEN) {
     throw new Error("Telegram bot токен не найден");
@@ -13,15 +12,8 @@ if (!process.env.TG_BOT_TOKEN) {
 
 const bot = new Bot<ExtendedContext>(process.env.TG_BOT_TOKEN);
 
-// Проверка транзакций каждые 5 минут
-cron.schedule("*/5 * * * *", async () => {
-    try {
-        // Отмена транзакций, находящихся в ожидании более 30 минут
-        await cancelExpiredTransactions(30);
-    } catch (error) {
-        console.error("Ошибка в cron:", error);
-    }
-});
+// Удаление истекших транзакций каждые 5 минут
+scheduleTransactionsCleanup();
 
 async function addRecords() {
     try {
@@ -234,46 +226,6 @@ async function addRecords() {
 }
 
 addRecords();
-
-// Функция проверки оплаты через BlockCypher
-async function checkPayment(
-    btcAmount: number
-): Promise<{ paid: boolean; tx_hash?: string }> {
-    try {
-        // Запрос к BlockCypher для получения данных об адресе
-        const btcAddress = await Configuration.findOne().then(
-            (config) => config?.btcAddress
-        );
-
-        if (btcAddress) {
-            const response = await axios.get(
-                `https://api.blockcypher.com/v1/btc/main/addrs/${btcAddress}`
-            );
-            const data = response.data;
-
-            // Получаем список транзакций
-            const transactions = data.txrefs || [];
-
-            for (const tx of transactions) {
-                // Сумма в BlockCypher в сатоши (1 BTC = 10^8 сатоши)
-                const txAmount = tx.value / 100000000;
-                console.log(txAmount);
-                // Проверяем сумму и подтверждения
-                if (
-                    Math.abs(txAmount - btcAmount) < 0.00000001 && // Точность до 8 знаков
-                    tx.confirmations >= 1 // Минимум 1 подтверждение
-                ) {
-                    return { paid: true, tx_hash: tx.tx_hash };
-                }
-            }
-        }
-
-        return { paid: false };
-    } catch (error) {
-        console.error("Ошибка проверки оплаты через BlockCypher:", error);
-        return { paid: false };
-    }
-}
 
 // Мидлвара для хранения сессий
 bot.use(
@@ -654,78 +606,8 @@ bot.on("message", async (ctx) => {
     );
 });
 
-async function sendAdminMenu(
-    ctx: ExtendedContext,
-    option: "create" | "edit" = "create"
-) {
-    const session = ctx.session;
-    session.adminStep = "admin_menu";
-    const botMessage = `
-<b>✨ Админ-панель</b>
-Ниже представлены разделы, с которыми вы можете взаимодействовать. Выберите один из них:
-    `;
-    const adminMenuKeyboard = new InlineKeyboard()
-        .text("🛍️ Товары", "admin_products")
-        .text("🏙️ Города", "admin_cities")
-        .row()
-        .text("⚙️ Конфигурация", "admin_config")
-        .text("🏠 Главное меню", "menu");
-
-    if (option === "edit") {
-        return await ctx.editMessageText(botMessage, {
-            reply_markup: adminMenuKeyboard,
-            parse_mode: "HTML",
-        });
-    }
-
-    return await ctx.reply(botMessage, {
-        reply_markup: adminMenuKeyboard,
-        parse_mode: "HTML",
-    });
-}
-
-async function sendMainMenu(
-    ctx: ExtendedContext,
-    option: "create" | "edit" = "create"
-) {
-    const session = ctx.session;
-    session.step = "start";
-    session.cityId = null;
-    session.productId = null;
-    const botMessage = `
-<b>✨ Добро пожаловать в наш магазин! ✨</b>
-
-Здесь вы найдёте всё необходимое. Используйте меню ниже, чтобы выбрать интересующий вас раздел 
-    `;
-    const menuKeyboard = new InlineKeyboard()
-        .text("🛍️ Мои покупки", "purchases")
-        .text("🛒 Товары", "cities")
-        .text("⚙️ Админ-панель", "admin_panel")
-        .row()
-        .url("⭐️ Отзывы", "https://example.com")
-        .url("💬 Поддержка", "https://example.com");
-
-    if (option === "edit") {
-        return await ctx.editMessageText(botMessage, {
-            reply_markup: menuKeyboard,
-            parse_mode: "HTML",
-        });
-    }
-
-    const sendedMessageId = await ctx
-        .reply(botMessage, {
-            reply_markup: menuKeyboard,
-            parse_mode: "HTML",
-        })
-        .then((message) => message.message_id);
-    ctx.session.botLastMessageId = sendedMessageId;
-    return sendedMessageId;
-}
-
-// Обработка ошибок
 bot.catch((err) => {
-    console.error("Произошла ошибка в боте: ", err);
+    console.error("Произошла ошибка в боте:\n", err);
 });
 
-// Запуск бота
 bot.start();
