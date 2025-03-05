@@ -4,7 +4,10 @@ import { connectToDatabase } from "../database/index";
 import { generateUniqueAmount, getUniqueProducts } from "./helpers";
 import { ExtendedContext, SessionData } from "./types";
 import { sendMainMenu, sendAdminMenu } from "./menus";
-import { scheduleTransactionsCleanup } from "./transations";
+import {
+    getUserCanceledTransactions,
+    scheduleTransactionsCleanup,
+} from "./transations";
 
 if (!process.env.TG_BOT_TOKEN) {
     throw new Error("Telegram bot токен не найден");
@@ -359,15 +362,30 @@ bot.on("callback_query:data", async (ctx) => {
             city_id: cityId,
         });
         const tgUserId = ctx.callbackQuery.from.id;
-        const isUserGotReservedPurchases = await Transaction.findOne({
+
+        const checkOrderMinutes = 15;
+        const isUserCanceledThreeOrdersInLast30Minutes =
+            (await getUserCanceledTransactions(tgUserId, checkOrderMinutes)).length > 2
+                ? true
+                : false;
+        const isUserGotReservedPurchases = (await Transaction.findOne({
             customer_tg_id: tgUserId,
             status: "pending",
-        }) ? true : false;
+        }))
+            ? true
+            : false;
 
         if (isUserGotReservedPurchases) {
             return await ctx.answerCallbackQuery(
                 "У вас есть активные заказы.\n" +
                     "Чтобы купить товар, оплатите или отмените предыдущий заказ"
+            );
+        }
+
+        if (isUserCanceledThreeOrdersInLast30Minutes) {
+            return await ctx.answerCallbackQuery(
+                "Вы слишком часто отменяли заказы.\n" +
+                    `Подождите около ${checkOrderMinutes} минут чтобы совершить следующий`
             );
         }
         if (!product || !configData) {

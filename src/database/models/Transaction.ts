@@ -7,7 +7,7 @@ const TransactionSchema = new Schema({
     btc_amount: { type: Number, required: true },
     status: {
         type: String,
-        enum: ["pending", "paid", "completed", "canceled"],
+        enum: ["pending", "completed", "canceled"],
         default: "pending",
     },
     tx_hash: { type: String },

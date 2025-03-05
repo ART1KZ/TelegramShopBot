@@ -1,7 +1,10 @@
 import { Transaction, Product } from "../../database/models";
 
-// Функция, отменяющая транзакции, которые пробыли в ожидании больше чем указанное количество минут
-async function cancelExpiredTransactions(minutes: number) {
+/**
+ * Функция, отменяющая транзакции, которые пробыли в ожидании больше чем указанное количество минут,
+ * а также восстанавливающая зарезервированные лоты
+ */
+async function manageExpiredTransactions(minutes: number) {
     const timeout = minutes * 60 * 1000; // Максимальное время ожидания в секундах
     const cutoffTime = new Date(Date.now() - timeout); // Время 30 минут назад
 
@@ -35,4 +38,4 @@ async function cancelExpiredTransactions(minutes: number) {
     }
 }
 
-export default cancelExpiredTransactions;
+export default manageExpiredTransactions;

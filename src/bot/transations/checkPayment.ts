@@ -1,6 +1,12 @@
 import axios from "axios";
 
-// Функция проверки платежа в блокчейне по сумме
+/**
+ * Проверяет был ли оплачен товар и возвращает обьект информации о транзакции в блокчейне
+ *
+ * @param {boolean} payableBtcAddress - bitcoin адрес на который происходит оплата
+ * @param {number} btcAmount - количество BTC, которые нужно было перевести
+ * @returns Массив отменённых транзакций за указанный период.
+ */
 async function checkPayment(
     payableBtcAddress: string,
     btcAmount: number
