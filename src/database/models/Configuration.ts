@@ -6,11 +6,11 @@ const ConfigurationSchema = new Schema(
             type: Date,
             default: () => new Date(),
         },
-        adminPassword: {
+        admin_password: {
             type: String,
             required: true,
         },
-        btcAddress: {
+        btc_address: {
             type: String,
             required: true,
         },

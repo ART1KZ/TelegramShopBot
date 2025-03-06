@@ -3,3 +3,4 @@ export { default as scheduleTransactionsCleanup } from "./scheduleTransactionsCl
 export { default as checkPayment } from "./checkPayment";
 export { default as getUserCanceledTransactions } from "./getUserCanceledTransactions";
 export { default as cancelTransactionAndProduct } from "./cancelTransactionAndProduct";
+export { default as sendInvoicePayable } from "./sendInvoicePayable";

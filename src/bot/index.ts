@@ -8,6 +8,7 @@ import {
     cancelTransactionAndProduct,
     getUserCanceledTransactions,
     scheduleTransactionsCleanup,
+    sendInvoicePayable,
 } from "./transations";
 import mongoose from "mongoose";
 
@@ -221,8 +222,8 @@ async function addRecords() {
 
         if (!configCount) {
             await Configuration.create({
-                adminPassword: "test",
-                btcAddress: "1Q7rzSJm6Su4ymxPJ22EUDktfSLhRPAoN4",
+                admin_password: "test",
+                btc_address: "1Q7rzSJm6Su4ymxPJ22EUDktfSLhRPAoN4",
             });
         }
     } catch (e) {
@@ -368,7 +369,9 @@ bot.on("callback_query:data", async (ctx) => {
             }
         );
     } else if (data.startsWith("purchase_")) {
-        const configData = await Configuration.findOne();
+        const btcAddressToPay = await Configuration.findOne().then(
+            (config) => config?.btc_address
+        );
         const cityId = session.cityId;
         const productName = data.split("_")[1];
         const product = await Product.findOne({
@@ -381,15 +384,11 @@ bot.on("callback_query:data", async (ctx) => {
         const checkOrderMinutes = 10;
         const isUserRecentlyCanceledManyOrders =
             (await getUserCanceledTransactions(tgUserId, checkOrderMinutes))
-                .length > 2
-                ? true 
-                : false;
-        const isUserGotReservedPurchases = (await Transaction.findOne({
+                .length > 2;
+        const isUserGotReservedPurchases = await Transaction.findOne({
             customer_tg_id: tgUserId,
             status: "pending",
-        }))
-            ? true
-            : false;
+        });
 
         if (isUserGotReservedPurchases) {
             return await ctx.answerCallbackQuery(
@@ -404,13 +403,18 @@ bot.on("callback_query:data", async (ctx) => {
                     `Подождите ${checkOrderMinutes} минут, чтобы совершить следующий заказ`
             );
         }
-        if (!product || !configData) {
+        if (!product) {
             return await ctx.answerCallbackQuery(
                 "Товар уже зарезервирован или недоступен, попробуйте выбрать другой"
             );
         }
 
-        session.productId = product.id;
+        if (!btcAddressToPay) {
+            return await ctx.answerCallbackQuery(
+                "Не удалось создать счет из-за отсутсвия платежного адреса"
+            );
+        }
+
         product.status = "reserved";
         product.reserved_at = new Date();
         await product.save();
@@ -423,53 +427,18 @@ bot.on("callback_query:data", async (ctx) => {
         });
         await transaction.save();
 
-        await ctx.deleteMessage();
-
-        const sendedMessageId = await ctx
-            .reply(
-                `<b>📅 Товар "${product.name}"</b>\n\n` +
-                    `Отправьте <code>${transaction.btc_amount}</code> BTC на адрес: <code>${configData.btcAddress}</code>\n\n` +
-                    `<b>ВАЖНО!!! У вас есть 30 минут чтобы совершить транзакцию</b>\n\n` +
-                    `После оплаты нажмите <b>"Проверить оплату"</b>\n` +
-                    `Текущий и завершенные заказы вы можете найти\n` +
-                    `во вкладке <b>"🛍️ Мои заказы"</b> в главном меню`,
-
-                {
-                    reply_markup: {
-                        inline_keyboard: [
-                            [
-                                {
-                                    text: "🔍 Проверить оплату",
-                                    callback_data: `check_${transaction._id}`,
-                                },
-                            ],
-                            [
-                                {
-                                    text: "❌ Отменить покупку",
-                                    callback_data: `cancel_${transaction._id}`,
-                                },
-                            ],
-                            [
-                                {
-                                    text: "🔄 Обновить информацию о времени",
-                                    callback_data: `order_${transaction._id}`,
-                                },
-                            ],
-                        ],
-                    },
-                    parse_mode: "HTML",
-                }
-            )
-            .then((message) => message.message_id);
-
-        session.botOrderMessageId = sendedMessageId;
-        await ctx.answerCallbackQuery();
-
-        return sendedMessageId;
+        return await sendInvoicePayable(
+            ctx,
+            transaction,
+            product,
+            btcAddressToPay
+        );
     } else if (data.startsWith("cancel_")) {
         try {
             const transactionId = data.split("_")[1];
-            const productId = await Transaction.findById(transactionId).then(transaction => transaction?.product_id)
+            const productId = await Transaction.findById(transactionId).then(
+                (transaction) => transaction?.product_id
+            );
 
             if (!productId) {
                 return await ctx.answerCallbackQuery(
@@ -479,7 +448,7 @@ bot.on("callback_query:data", async (ctx) => {
 
             await cancelTransactionAndProduct(
                 new mongoose.Types.ObjectId(transactionId),
-                new mongoose.Types.ObjectId(productId),
+                new mongoose.Types.ObjectId(productId)
             );
 
             return await sendMainMenu(ctx, "edit");
@@ -513,7 +482,7 @@ bot.on("callback_query:data", async (ctx) => {
                     product.status = "sold";
                     product.sold_at = new Date();
                     await product.save();
-                    session.productId = null;
+                    // session.productId = null;
                     await ctx.editMessageText(
                         `<b>🎉 Спасибо за покупку!</b>\n\n` +
                             `<b>💎 Ваш товар:</b> <code>${product.data}</code>`,
@@ -606,11 +575,13 @@ bot.on("callback_query:data", async (ctx) => {
         const transaction = await Transaction.findById(transactionId);
         const productId = transaction?.product_id;
         const product = await Product.findById(productId);
-        const configData = await Configuration.findOne();
+        const btcAddressToPay = await Configuration.findOne().then(
+            (config) => config?.btc_address
+        );
         const notFoundMessage =
             "Заказ не найден. Возможно, стоит попробовать позже";
 
-        if (!product || !transaction || !configData) {
+        if (!product || !transaction || !btcAddressToPay) {
             return ctx.answerCallbackQuery(notFoundMessage);
         }
 
@@ -633,82 +604,12 @@ bot.on("callback_query:data", async (ctx) => {
             );
         }
 
-        const createdAt = new Date(transaction.created_at); // Время создания транзакции
-        const now = new Date(); // Текущее время
-        const timeDiffMs = now.getTime() - createdAt.getTime(); // Разница в миллисекундах
-        const maxTimeMs = 30 * 60 * 1000; // 30 минут в миллисекундах
-        const timeLeftMs = maxTimeMs - timeDiffMs; // Оставшееся время в миллисекундах
-
-        // Перевод оставшегося времени в минуты и секунды
-        const minutesLeft = Math.floor(timeLeftMs / (60 * 1000)); // Целые минуты
-        const secondsLeft = Math.floor((timeLeftMs % (60 * 1000)) / 1000); // Оставшиеся секунды
-
-        // Проверка на истечение срока
-        let timeLeftText =
-            timeLeftMs > 0
-                ? `${minutesLeft} мин ${secondsLeft} сек`
-                : "Время истекло";
-
-        if (timeLeftText === "Время истекло") {
-            try {
-                await cancelTransactionAndProduct(transaction._id, product._id);
-
-                if (ctx.chat?.id) {
-                    // return ctx.api
-                    //     .deleteMessage(
-                    //         ctx.chat.id,
-                    //         ctx.session.botOrderMessageId
-                    //     )
-                    //     .then((ctx.session.botOrderMessageId = null));
-
-                    return sendMainMenu(ctx, "edit");
-                }
-            } catch (error) {
-                console.error(
-                    "Не удалось автоматически отменить транзакцию:\n",
-                    error
-                );
-                return ctx.answerCallbackQuery("Ошибка при отмене транзакции");
-            }
-        }
-
-        // Если время еще есть, показывает обновленную информацию
-        await ctx.editMessageText(
-            `<b>📅 Товар "${product.name}"</b>\n\n` +
-                `Отправьте <code>${transaction.btc_amount}</code> BTC на адрес:\n` +
-                `<code>${configData.btcAddress}</code>\n\n` +
-                `<b>ВАЖНО!!! У вас есть ${timeLeftText} чтобы совершить транзакцию</b>\n\n` +
-                `После оплаты нажмите <b>"Проверить оплату"</b>\n` +
-                `Текущий и завершенные заказы вы можете найти\n` +
-                `во вкладке <b>"🛍️ Мои заказы"</b> в главном меню`,
-
-            {
-                reply_markup: {
-                    inline_keyboard: [
-                        [
-                            {
-                                text: "🔍 Проверить оплату",
-                                callback_data: `check_${transaction._id}`,
-                            },
-                        ],
-                        [
-                            {
-                                text: "❌ Отменить покупку",
-                                callback_data: `cancel_${transaction._id}`,
-                            },
-                        ],
-                        [
-                            {
-                                text: "🔄 Обновить информацию о времени",
-                                callback_data: `order_${transaction._id}`,
-                            },
-                        ],
-                    ],
-                },
-                parse_mode: "HTML",
-            }
+        return await sendInvoicePayable(
+            ctx,
+            transaction,
+            product,
+            btcAddressToPay
         );
-        await ctx.answerCallbackQuery(); // Подтверждаем обработку callback
     }
 });
 
