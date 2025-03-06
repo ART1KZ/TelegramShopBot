@@ -484,7 +484,8 @@ bot.on("callback_query:data", async (ctx) => {
                     await product.save();
                     // session.productId = null;
                     await ctx.editMessageText(
-                        `<b>🎉 Спасибо за покупку!</b>\n\n` +
+                        `<b>🎉 Спасибо за покупку!</b>\n` +
+                            `<b>🆔 Заказ №:</b> <code>${transaction._id}</code>\n` +
                             `<b>💎 Ваш товар:</b> <code>${product.data}</code>`,
                         {
                             reply_markup: {
@@ -587,7 +588,9 @@ bot.on("callback_query:data", async (ctx) => {
 
         if (product.status === "sold") {
             return ctx.editMessageText(
-                `<b>💎 Ваш товар:</b> <code>${product.data}</code>`,
+                `<b>🏷️ Название товара:</b> ${product.name}\n` +
+                    `<b>🆔 Заказ №:</b> <code>${transaction._id}</code>\n` +
+                    `<b>💎 Товар:</b> <code>${product.data}</code>`,
                 {
                     reply_markup: {
                         inline_keyboard: [
