@@ -9,6 +9,7 @@ import {
     getUserCanceledTransactions,
     scheduleTransactionsCleanup,
 } from "./transations";
+import mongoose from "mongoose";
 
 if (!process.env.TG_BOT_TOKEN) {
     throw new Error("Telegram bot токен не найден");
@@ -239,6 +240,7 @@ bot.use(
             cityId: null,
             productId: null,
             botLastMessageId: null,
+            botOrderMessageId: null,
             isAdmin: null,
             adminStep: null,
             tempProduct: null,
@@ -253,7 +255,7 @@ bot.command("start", async (ctx) => {
 
 // Обработка нажатий на кнопку
 bot.on("callback_query:data", async (ctx) => {
-    let data = ctx.callbackQuery.data;
+    const data = ctx.callbackQuery.data;
     const session = ctx.session;
 
     // Если пользователь нажал на кнопку "Товары"
@@ -380,7 +382,7 @@ bot.on("callback_query:data", async (ctx) => {
         const isUserRecentlyCanceledManyOrders =
             (await getUserCanceledTransactions(tgUserId, checkOrderMinutes))
                 .length > 2
-                ? true
+                ? true 
                 : false;
         const isUserGotReservedPurchases = (await Transaction.findOne({
             customer_tg_id: tgUserId,
@@ -421,68 +423,66 @@ bot.on("callback_query:data", async (ctx) => {
         });
         await transaction.save();
 
-        await ctx.editMessageText(
-            `<b>📅 Товар "${product.name}"</b>\n\n` +
-                `Отправьте <code>${transaction.btc_amount}</code> BTC на адрес: <code>${configData.btcAddress}</code>\n\n` +
-                `<b>ВАЖНО!!! У вас есть 30 минут чтобы совершить транзакцию</b>\n\n` +
-                `После оплаты нажмите <b>"Проверить оплату"</b>\n` +
-                `Текущий и завершенные заказы вы можете найти\n` +
-                `во вкладке <b>"🛍️ Мои заказы"</b> в главном меню`,
+        await ctx.deleteMessage();
 
-            {
-                reply_markup: {
-                    inline_keyboard: [
-                        [
-                            {
-                                text: "🔍 Проверить оплату",
-                                callback_data: `check_${transaction._id}`,
-                            },
-                        ],
-                        [
-                            {
-                                text: "❌ Отменить покупку",
-                                callback_data: `cancel_${transaction._id}`,
-                            },
-                        ],
-                        [
-                            {
-                                text: "🔄 Обновить информацию о времени",
-                                callback_data: `order_${transaction._id}`,
-                            },
-                        ],
-                    ],
-                },
-                parse_mode: "HTML",
-            }
-        );
+        const sendedMessageId = await ctx
+            .reply(
+                `<b>📅 Товар "${product.name}"</b>\n\n` +
+                    `Отправьте <code>${transaction.btc_amount}</code> BTC на адрес: <code>${configData.btcAddress}</code>\n\n` +
+                    `<b>ВАЖНО!!! У вас есть 30 минут чтобы совершить транзакцию</b>\n\n` +
+                    `После оплаты нажмите <b>"Проверить оплату"</b>\n` +
+                    `Текущий и завершенные заказы вы можете найти\n` +
+                    `во вкладке <b>"🛍️ Мои заказы"</b> в главном меню`,
 
-        return await ctx.answerCallbackQuery();
+                {
+                    reply_markup: {
+                        inline_keyboard: [
+                            [
+                                {
+                                    text: "🔍 Проверить оплату",
+                                    callback_data: `check_${transaction._id}`,
+                                },
+                            ],
+                            [
+                                {
+                                    text: "❌ Отменить покупку",
+                                    callback_data: `cancel_${transaction._id}`,
+                                },
+                            ],
+                            [
+                                {
+                                    text: "🔄 Обновить информацию о времени",
+                                    callback_data: `order_${transaction._id}`,
+                                },
+                            ],
+                        ],
+                    },
+                    parse_mode: "HTML",
+                }
+            )
+            .then((message) => message.message_id);
+
+        session.botOrderMessageId = sendedMessageId;
+        await ctx.answerCallbackQuery();
+
+        return sendedMessageId;
     } else if (data.startsWith("cancel_")) {
         try {
             const transactionId = data.split("_")[1];
-            const productId = session.productId;
-            await Transaction.updateOne(
-                { _id: transactionId, status: "pending" },
-                { status: "canceled" }
-            );
-            await Product.updateOne(
-                { _id: productId },
-                { status: "available", reserved_at: null }
+            const productId = await Transaction.findById(transactionId).then(transaction => transaction?.product_id)
+
+            if (!productId) {
+                return await ctx.answerCallbackQuery(
+                    "Не удалось отменить заказ"
+                );
+            }
+
+            await cancelTransactionAndProduct(
+                new mongoose.Types.ObjectId(transactionId),
+                new mongoose.Types.ObjectId(productId),
             );
 
-            await ctx.editMessageText("<b>✅ Покупка успешно отменена</b>", {
-                reply_markup: {
-                    inline_keyboard: [
-                        [
-                            {
-                                text: "🏠 В главное меню",
-                                callback_data: `menu`,
-                            },
-                        ],
-                    ],
-                },
-                parse_mode: "HTML",
-            });
+            return await sendMainMenu(ctx, "edit");
         } catch (error) {
             console.error(
                 "Не удалось отменить транзакцию пользователем:\n\n",
@@ -492,13 +492,13 @@ bot.on("callback_query:data", async (ctx) => {
     }
     // Проверка оплаты
     else if (data.startsWith("check_")) {
-        const cityId = session.cityId;
         const transactionId = data.split("_")[1];
         const transaction = await Transaction.findOne({
-            id: transactionId,
+            _id: transactionId,
             status: "pending",
         });
-        if (transaction && transaction.status === "pending" && cityId) {
+
+        if (transaction && transaction.status === "pending") {
             // const { paid, tx_hash } = await checkPayment(
             // transaction.created_at,
             //     transaction.btc_amount
@@ -649,28 +649,20 @@ bot.on("callback_query:data", async (ctx) => {
                 ? `${minutesLeft} мин ${secondsLeft} сек`
                 : "Время истекло";
 
-        // Если время истекло, имитируем нажатие на "cancel_"
         if (timeLeftText === "Время истекло") {
-            // Выполняем логику отмены транзакции
             try {
                 await cancelTransactionAndProduct(transaction._id, product._id);
-                await ctx.editMessageText(
-                    "<b>⏰ Время истекло, покупка автоматически отменена</b>",
-                    {
-                        reply_markup: {
-                            inline_keyboard: [
-                                [
-                                    {
-                                        text: "🏠 В главное меню",
-                                        callback_data: `menu`,
-                                    },
-                                ],
-                            ],
-                        },
-                        parse_mode: "HTML",
-                    }
-                );
-                return await ctx.answerCallbackQuery();
+
+                if (ctx.chat?.id) {
+                    // return ctx.api
+                    //     .deleteMessage(
+                    //         ctx.chat.id,
+                    //         ctx.session.botOrderMessageId
+                    //     )
+                    //     .then((ctx.session.botOrderMessageId = null));
+
+                    return sendMainMenu(ctx, "edit");
+                }
             } catch (error) {
                 console.error(
                     "Не удалось автоматически отменить транзакцию:\n",
@@ -680,12 +672,12 @@ bot.on("callback_query:data", async (ctx) => {
             }
         }
 
-        // Если время еще есть, показываем обновленную информацию
+        // Если время еще есть, показывает обновленную информацию
         await ctx.editMessageText(
             `<b>📅 Товар "${product.name}"</b>\n\n` +
                 `Отправьте <code>${transaction.btc_amount}</code> BTC на адрес:\n` +
                 `<code>${configData.btcAddress}</code>\n\n` +
-                `<b>ВАЖНО!!! У вас осталось ${timeLeftText} чтобы совершить транзакцию</b>\n\n` +
+                `<b>ВАЖНО!!! У вас есть ${timeLeftText} чтобы совершить транзакцию</b>\n\n` +
                 `После оплаты нажмите <b>"Проверить оплату"</b>\n` +
                 `Текущий и завершенные заказы вы можете найти\n` +
                 `во вкладке <b>"🛍️ Мои заказы"</b> в главном меню`,
