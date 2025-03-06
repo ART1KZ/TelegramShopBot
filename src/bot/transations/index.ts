@@ -2,3 +2,4 @@ export { default as manageExpiredTransactions } from "./manageExpiredTransaction
 export { default as scheduleTransactionsCleanup } from "./scheduleTransactionsCleanup";
 export { default as checkPayment } from "./checkPayment";
 export { default as getUserCanceledTransactions } from "./getUserCanceledTransactions";
+export { default as cancelTransactionAndProduct } from "./cancelTransactionAndProduct";

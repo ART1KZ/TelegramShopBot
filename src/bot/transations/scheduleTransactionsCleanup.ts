@@ -8,7 +8,7 @@ function scheduleTransactionsCleanup() {
     // Проверка транзакций каждые 5 минут
     cron.schedule("*/5 * * * *", async () => {
         try {
-            await manageExpiredTransactions(30);
+            await manageExpiredTransactions(90);
         } catch (error) {
             console.error("Ошибка в cron:", error);
         }

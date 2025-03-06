@@ -25,10 +25,14 @@ async function sendAdminMenu(
         });
     }
 
-    return await ctx.reply(botMessage, {
-        reply_markup: adminMenuKeyboard,
-        parse_mode: "HTML",
-    });
+    const sendedMessageId = await ctx
+        .reply(botMessage, {
+            reply_markup: adminMenuKeyboard,
+            parse_mode: "HTML",
+        })
+        .then((message) => message.message_id);
+
+    return ctx.session.botLastMessageId = sendedMessageId;
 }
 
 export default sendAdminMenu;

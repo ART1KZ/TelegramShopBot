@@ -5,7 +5,6 @@ import axios from "axios";
  *
  * @param {boolean} payableBtcAddress - bitcoin адрес на который происходит оплата
  * @param {number} btcAmount - количество BTC, которые нужно было перевести
- * @returns Массив отменённых транзакций за указанный период.
  */
 async function checkPayment(
     payableBtcAddress: string,

@@ -15,7 +15,7 @@ async function sendMainMenu(
 Здесь вы найдёте всё необходимое. Используйте меню ниже, чтобы выбрать интересующий вас раздел 
     `;
     const menuKeyboard = new InlineKeyboard()
-        .text("🛍️ Мои покупки", "purchases")
+        .text("🛍️ Мои заказы", "orders")
         .text("🛒 Товары", "cities")
         .text("⚙️ Админ-панель", "admin_panel")
         .row()
@@ -35,8 +35,8 @@ async function sendMainMenu(
             parse_mode: "HTML",
         })
         .then((message) => message.message_id);
-    ctx.session.botLastMessageId = sendedMessageId;
-    return sendedMessageId;
+    
+    return ctx.session.botLastMessageId = sendedMessageId;
 }
 
 export default sendMainMenu;
