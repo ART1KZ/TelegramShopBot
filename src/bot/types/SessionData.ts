@@ -4,8 +4,8 @@ interface SessionData {
     productId: string | null;
     botLastMessageId: number | null;
     botOrderMessageId: number | null;
-    isAdmin: boolean | null;
-    adminStep: string | null;
+    userAdminPassword: string | undefined;
+    adminStep: string | undefined;
     tempProduct: { name?: string; price?: number; cityId?: string } | null;
 }
 

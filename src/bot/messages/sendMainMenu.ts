@@ -6,7 +6,6 @@ async function sendMainMenu(
     option: "create" | "edit" = "create"
 ) {
     const session = ctx.session;
-    session.step = "start";
     session.cityId = null;
     session.productId = null;
     const botMessage = `
@@ -35,8 +34,8 @@ async function sendMainMenu(
             parse_mode: "HTML",
         })
         .then((message) => message.message_id);
-    
-    return ctx.session.botLastMessageId = sendedMessageId;
+
+    return (ctx.session.botLastMessageId = sendedMessageId);
 }
 
 export default sendMainMenu;

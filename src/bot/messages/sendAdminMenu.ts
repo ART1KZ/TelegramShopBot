@@ -32,7 +32,7 @@ async function sendAdminMenu(
         })
         .then((message) => message.message_id);
 
-    return ctx.session.botLastMessageId = sendedMessageId;
+    return (ctx.session.botLastMessageId = sendedMessageId);
 }
 
 export default sendAdminMenu;

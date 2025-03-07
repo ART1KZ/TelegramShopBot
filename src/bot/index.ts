@@ -1,9 +1,9 @@
 import { Bot, InlineKeyboard, session } from "grammy";
 import { City, Product, Transaction, Configuration } from "../database/models";
-import { connectToDatabase } from "../database/index";
+import connectToDatabase from "../database/index";
 import { generateUniqueAmount, getUniqueProducts } from "./helpers";
 import { ExtendedContext, SessionData } from "./types";
-import { sendMainMenu, sendAdminMenu } from "./menus";
+import { sendMainMenu, sendAdminMenu, sendErrorMessage } from "./messages";
 import {
     cancelTransactionAndProduct,
     getUserCanceledTransactions,
@@ -11,6 +11,7 @@ import {
     sendInvoicePayable,
 } from "./transations";
 import mongoose from "mongoose";
+import sendSuccessfulMessage from "./messages/sendSuccessfulMessage";
 
 if (!process.env.TG_BOT_TOKEN) {
     throw new Error("Telegram bot токен не найден");
@@ -242,19 +243,42 @@ bot.use(
             productId: null,
             botLastMessageId: null,
             botOrderMessageId: null,
-            isAdmin: null,
-            adminStep: null,
+            userAdminPassword: undefined,
+            adminStep: undefined,
             tempProduct: null,
         }),
     })
 );
+
+// Мидлвара для проверки авторизации админки
+bot.use(async (ctx, next) => {
+    const callbackQueryData = ctx.callbackQuery?.data;
+    if (
+        ctx.callbackQuery &&
+        callbackQueryData?.startsWith("admin_") &&
+        callbackQueryData !== "admin_panel"
+    ) {
+        const isAdminPasswordValid = (await Configuration.findOne({
+            admin_password: ctx.session.userAdminPassword,
+        }))
+            ? true
+            : false;
+        if (!isAdminPasswordValid) {
+            return await ctx.answerCallbackQuery(
+                "Не узнаю вас. Введите ключ доступа через /start → Админ-панель"
+            );
+        }
+    }
+
+    await next(); // Продолжаем обработку для других запросов
+});
 
 // Обработчик команды /start
 bot.command("start", async (ctx) => {
     await sendMainMenu(ctx);
 });
 
-// Обработка нажатий на кнопку
+// Обрабочик нажатий на кнопки
 bot.on("callback_query:data", async (ctx) => {
     const data = ctx.callbackQuery.data;
     const session = ctx.session;
@@ -382,7 +406,7 @@ bot.on("callback_query:data", async (ctx) => {
         const tgUserId = ctx.callbackQuery.from.id;
 
         const checkOrderMinutes = 10;
-        const isUserRecentlyCanceledManyOrders =
+        const isUserCanceledManyOrders =
             (await getUserCanceledTransactions(tgUserId, checkOrderMinutes))
                 .length > 2;
         const isUserGotReservedPurchases = await Transaction.findOne({
@@ -397,10 +421,10 @@ bot.on("callback_query:data", async (ctx) => {
             );
         }
 
-        if (isUserRecentlyCanceledManyOrders) {
+        if (isUserCanceledManyOrders) {
             return await ctx.answerCallbackQuery(
                 "Вы слишком часто отменяли заказы.\n" +
-                    `Подождите ${checkOrderMinutes} минут, чтобы совершить следующий заказ`
+                    `Подождите около ${checkOrderMinutes} минут, прежде чем совершить следующий заказ`
             );
         }
         if (!product) {
@@ -436,14 +460,13 @@ bot.on("callback_query:data", async (ctx) => {
     } else if (data.startsWith("cancel_")) {
         try {
             const transactionId = data.split("_")[1];
-            const productId = await Transaction.findById(transactionId).then(
-                (transaction) => transaction?.product_id
-            );
+            const productId = await Transaction.findOne({
+                _id: transactionId,
+                status: "pending",
+            }).then((transaction) => transaction?.product_id);
 
             if (!productId) {
-                return await ctx.answerCallbackQuery(
-                    "Не удалось отменить заказ"
-                );
+                return ctx.deleteMessage();
             }
 
             await cancelTransactionAndProduct(
@@ -483,7 +506,7 @@ bot.on("callback_query:data", async (ctx) => {
                     product.sold_at = new Date();
                     await product.save();
                     // session.productId = null;
-                    await ctx.editMessageText(
+                    return await ctx.editMessageText(
                         `<b>🎉 Спасибо за покупку!</b>\n` +
                             `<b>🆔 Заказ №:</b> <code>${transaction._id}</code>\n` +
                             `<b>💎 Ваш товар:</b> <code>${product.data}</code>`,
@@ -503,9 +526,12 @@ bot.on("callback_query:data", async (ctx) => {
                     );
                 }
             } else {
-                await ctx.answerCallbackQuery("Оплата ещё не получена.");
+                return await ctx.answerCallbackQuery("Оплата ещё не получена");
             }
         }
+        return await ctx.answerCallbackQuery(
+            "Не удалось проверить оплату. Возможно, заказ уже отменен или завершен"
+        );
     }
 
     // Отмена, возвращение в меню
@@ -613,6 +639,135 @@ bot.on("callback_query:data", async (ctx) => {
             product,
             btcAddressToPay
         );
+    } else if (data === "admin_panel") {
+        const isAdminPasswordValid = (await Configuration.findOne({
+            admin_password: session.userAdminPassword,
+        }))
+            ? true
+            : false;
+        if (!isAdminPasswordValid) {
+            session.adminStep = "password_input";
+
+            return await ctx.editMessageText(
+                "🔑 <b>Введите ключ доступа ниже</b>",
+                {
+                    reply_markup: {
+                        inline_keyboard: [
+                            [
+                                {
+                                    text: "❌ Назад",
+
+                                    callback_data: `menu`,
+                                },
+                            ],
+                        ],
+                    },
+
+                    parse_mode: "HTML",
+                }
+            );
+        }
+        return await sendAdminMenu(ctx, "edit");
+    } else if (data === "admin_config") {
+        session.adminStep = undefined;
+        const configuration = await Configuration.findOne();
+
+        if (!configuration) {
+            return await ctx.answerCallbackQuery(
+                "Не удалось получить адрес оплаты"
+            );
+        }
+
+        return await ctx.editMessageText(
+            `<b>💸 Текущий адрес оплаты:</b> <code>${configuration.btc_address}</code>\n` +
+                `<b>🔑 Текущий пароль к админке:</b> <code>${configuration.admin_password}</code>`,
+            {
+                reply_markup: {
+                    inline_keyboard: [
+                        [
+                            {
+                                text: "🔄 Изменить пароль",
+
+                                callback_data: `admin_configuration_password`,
+                            },
+                        ],
+                        [
+                            {
+                                text: "🔄 Изменить адрес оплаты",
+
+                                callback_data: `admin_configuration_address`,
+                            },
+                        ],
+                        [
+                            {
+                                text: "❌ Назад",
+
+                                callback_data: `admin_panel`,
+                            },
+                        ],
+                    ],
+                },
+
+                parse_mode: "HTML",
+            }
+        );
+    } else if (data.startsWith("admin_configuration_")) {
+        const isPasswordChanging = data.split("_")[2] === "password";
+        const isBtcAddressChanging = data.split("_")[2] === "address";
+
+        if (isPasswordChanging) {
+            session.adminStep = "admin_update_password";
+            return await ctx.editMessageText(
+                `<b>💸 Отправьте новый пароль для входа без кавычек и пробелов</b>\n` +
+                    `<b>🔑 Пример:</b> da1s2lKsa!13L_asd2`,
+                {
+                    reply_markup: {
+                        inline_keyboard: [
+                            [
+                                {
+                                    text: "❌ Назад",
+
+                                    callback_data: `admin_config`,
+                                },
+                            ],
+                        ],
+                    },
+
+                    parse_mode: "HTML",
+                }
+            );
+        }
+
+        if (isBtcAddressChanging) {
+            const hasPendingTransactions =
+                (await Transaction.find({ status: "pending" })).length > 0;
+
+            if (hasPendingTransactions) {
+                return ctx.answerCallbackQuery(
+                    "Вы не можете изменить адрес оплаты, пока у клиентов есть активные неоплаченные заказы"
+                );
+            }
+            session.adminStep = "admin_update_address";
+            return await ctx.editMessageText(
+                `<b>💸 Отправьте новый адрес оплаты без кавычек и пробелов</b>\n` +
+                    `<b>🔑 Пример:</b> 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa`,
+                {
+                    reply_markup: {
+                        inline_keyboard: [
+                            [
+                                {
+                                    text: "❌ Назад",
+
+                                    callback_data: `admin_config`,
+                                },
+                            ],
+                        ],
+                    },
+
+                    parse_mode: "HTML",
+                }
+            );
+        }
     }
 });
 
@@ -620,9 +775,8 @@ bot.on("message", async (ctx) => {
     const session = ctx.session;
 
     if (session.adminStep === "password_input") {
-        const inputedPassword = ctx.message.text;
         const isPasswordValid = (await Configuration.findOne({
-            adminPassword: inputedPassword,
+            admin_password: ctx.message.text,
         }))
             ? true
             : false;
@@ -635,7 +789,7 @@ bot.on("message", async (ctx) => {
         }
 
         if (isPasswordValid) {
-            session.isAdmin = true;
+            session.userAdminPassword = ctx.message.text;
             return await sendAdminMenu(ctx);
         }
 
@@ -654,8 +808,48 @@ bot.on("message", async (ctx) => {
                 parse_mode: "HTML",
             })
             .then((message) => message.message_id);
+        session.adminStep = undefined;
 
         return (ctx.session.botLastMessageId = sendedMessageId);
+    } else if (session.adminStep?.startsWith("admin_update_")) {
+        const userMessage = ctx.message.text?.trim();
+
+        const isPasswordChanging =
+            session.adminStep.split("_")[2] === "password";
+        const isBtcAddressChanging =
+            session.adminStep.split("_")[2] === "address";
+
+        if (session.botLastMessageId) {
+            ctx.deleteMessage();
+            ctx.api.deleteMessage(ctx.chat.id, session.botLastMessageId);
+
+            session.botLastMessageId = null;
+        }
+
+        if (!userMessage) {
+            return await sendErrorMessage(ctx, "admin_panel");
+        }
+
+        const configuration = await Configuration.findOne();
+
+        if (!configuration) {
+            return await sendErrorMessage(ctx, "admin_panel");
+        }
+
+        if (isPasswordChanging) {
+            configuration.admin_password = userMessage;
+            await configuration.save();
+            session.userAdminPassword = userMessage;
+
+            return await sendSuccessfulMessage(ctx, "admin_panel");
+        }
+
+        if (isBtcAddressChanging) {
+            configuration.btc_address = userMessage;
+            await configuration.save();
+
+            return await sendSuccessfulMessage(ctx, "admin_panel");
+        }
     }
     const sendedMessageId = await ctx
         .reply(
