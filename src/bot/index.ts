@@ -686,16 +686,16 @@ bot.on("callback_query:data", async (ctx) => {
                     inline_keyboard: [
                         [
                             {
-                                text: "🔄 Изменить пароль",
-
-                                callback_data: `admin_configuration_password`,
+                                text: "🔄 Изменить адрес оплаты",
+                                
+                                callback_data: `admin_update_address`,
                             },
                         ],
                         [
                             {
-                                text: "🔄 Изменить адрес оплаты",
+                                text: "🔄 Изменить пароль",
 
-                                callback_data: `admin_configuration_address`,
+                                callback_data: `admin_update_password`,
                             },
                         ],
                         [
@@ -711,12 +711,35 @@ bot.on("callback_query:data", async (ctx) => {
                 parse_mode: "HTML",
             }
         );
-    } else if (data.startsWith("admin_configuration_")) {
+    } else if (data.startsWith("admin_option_")) {
+        const isCityOption = data.split("_")[2] === "city";
+
+        if (isCityOption) {
+            const cityId = data.split("_")[3];
+            const actionKeyboard = new InlineKeyboard();
+            const city = await City.findOne({ _id: cityId });
+
+            if (!city) {
+                return await sendErrorMessage(ctx, "admin_panel", "edit");
+            }
+
+            actionKeyboard
+                .text("🔄 Изменить", `admin_update_city_${cityId}`)
+                .text("🗑️ Удалить", `admin_delete_city_${cityId}`)
+                .row()
+                .text("❌ Назад", `admin_cities`);
+
+            return await ctx.editMessageText(`<b>🏙️ Город: ${city.name}</b>`, {
+                reply_markup: actionKeyboard,
+                parse_mode: "HTML",
+            });
+        }
+
         const isPasswordChanging = data.split("_")[2] === "password";
         const isBtcAddressChanging = data.split("_")[2] === "address";
 
         if (isPasswordChanging) {
-            session.adminStep = "admin_update_password";
+            session.adminStep = data;
             return await ctx.editMessageText(
                 `<b>💸 Отправьте новый пароль для входа без кавычек и пробелов</b>\n` +
                     `<b>🔑 Пример:</b> da1s2lKsa!13L_asd2`,
@@ -768,6 +791,85 @@ bot.on("callback_query:data", async (ctx) => {
                 }
             );
         }
+    } else if (data.startsWith("admin_delete_")) {
+        const isCityDeleting = data.split("_")[2] === "city";
+
+        if (isCityDeleting) {
+            const cityId = data.split("_")[3];
+
+            await City.deleteOne({ _id: cityId });
+
+            return await sendSuccessfulMessage(ctx, "admin_panel", "edit");
+        }
+    } else if (data === "admin_cities") {
+        const cities = await City.find();
+
+        const cityKeyboard = new InlineKeyboard();
+        cities.forEach((city, index) => {
+            // Добавляем кнопку с названием города и его ID
+            cityKeyboard.text(
+                `🏙️ ${city.name}`,
+                `admin_option_city_${city._id}`
+            );
+            // После каждой второй кнопки (или последней) добавляем перенос строки
+            if ((index + 1) % 2 === 0 || index === cities.length - 1) {
+                cityKeyboard.row();
+            }
+        });
+
+        // Кнопка "Назад" в отдельной строке
+        cityKeyboard.row().text("➕ Добавить город", "admin_create_city");
+        cityKeyboard.row().text("❌ Назад", "admin_panel");
+
+        await ctx.editMessageText("<b>🌆 Выберите город:</b>", {
+            reply_markup: cityKeyboard,
+            parse_mode: "HTML",
+        });
+    } else if (data.startsWith("admin_update_")) {
+        const isCityUpdate = data.split("_")[2] === "city";
+
+        if (isCityUpdate) {
+            const cityId = data.split("_")[3];
+
+            session.adminStep = data;
+
+            return await ctx.editMessageText(
+                `<b>🏙️ Отправьте новое название города</b>`,
+                {
+                    reply_markup: {
+                        inline_keyboard: [
+                            [
+                                {
+                                    text: "❌ Назад",
+                                    callback_data: `admin_option_city_${cityId}`,
+                                },
+                            ],
+                        ],
+                    },
+                    parse_mode: "HTML",
+                }
+            );
+        }
+    } else if (data === "admin_create_city") {
+        session.adminStep = "admin_create_city";
+        await ctx.editMessageText(
+            "<b>🏙️ Отправьте название нового города</b>",
+            {
+                reply_markup: {
+                    inline_keyboard: [
+                        [
+                            {
+                                text: "❌ Назад",
+
+                                callback_data: `admin_cities`,
+                            },
+                        ],
+                    ],
+                },
+
+                parse_mode: "HTML",
+            }
+        );
     }
 });
 
@@ -818,6 +920,7 @@ bot.on("message", async (ctx) => {
             session.adminStep.split("_")[2] === "password";
         const isBtcAddressChanging =
             session.adminStep.split("_")[2] === "address";
+        const isCityChanging = session.adminStep.split("_")[2] === "city";
 
         if (session.botLastMessageId) {
             ctx.deleteMessage();
@@ -830,6 +933,12 @@ bot.on("message", async (ctx) => {
             return await sendErrorMessage(ctx, "admin_panel");
         }
 
+        if (isCityChanging) {
+            const cityId = session.adminStep.split("_")[3];
+            await City.updateOne({ _id: cityId }, { name: userMessage });
+
+            return await sendSuccessfulMessage(ctx, "admin_panel");
+        }
         const configuration = await Configuration.findOne();
 
         if (!configuration) {
@@ -850,6 +959,22 @@ bot.on("message", async (ctx) => {
 
             return await sendSuccessfulMessage(ctx, "admin_panel");
         }
+    } else if (session.adminStep?.startsWith("admin_create_city")) {
+        const userMessage = ctx.message.text?.trim();
+
+        if (session.botLastMessageId) {
+            ctx.deleteMessage();
+            ctx.api.deleteMessage(ctx.chat.id, session.botLastMessageId);
+
+            session.botLastMessageId = null;
+        }
+
+        if (!userMessage) {
+            return await sendErrorMessage(ctx, "admin_panel");
+        }
+
+        await City.create({ name: userMessage });
+        return await sendSuccessfulMessage(ctx, "admin_panel");
     }
     const sendedMessageId = await ctx
         .reply(

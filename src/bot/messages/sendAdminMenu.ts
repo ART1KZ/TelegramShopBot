@@ -6,7 +6,7 @@ async function sendAdminMenu(
     option: "create" | "edit" = "create"
 ) {
     const session = ctx.session;
-    session.adminStep = "admin_menu";
+    session.adminStep = "undefined";
     const botMessage = `
 <b>✨ Админ-панель</b>
 Ниже представлены разделы, с которыми вы можете взаимодействовать. Выберите один из них:
