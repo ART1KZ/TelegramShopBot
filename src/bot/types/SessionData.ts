@@ -1,3 +1,5 @@
+import { AdminProductsGroup } from "./index";
+
 interface SessionData {
     step: string;
     cityId: string | null;
@@ -6,7 +8,7 @@ interface SessionData {
     botOrderMessageId: number | null;
     userAdminPassword: string | undefined;
     adminStep: string | undefined;
-    tempProduct: { name?: string; price?: number; cityId?: string } | null;
+    adminProductGroups: AdminProductsGroup[] | undefined;
 }
 
 export default SessionData;

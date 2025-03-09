@@ -7,6 +7,7 @@ async function sendAdminMenu(
 ) {
     const session = ctx.session;
     session.adminStep = "undefined";
+    session.adminProductGroups = undefined;
     const botMessage = `
 <b>✨ Админ-панель</b>
 Ниже представлены разделы, с которыми вы можете взаимодействовать. Выберите один из них:
@@ -16,6 +17,7 @@ async function sendAdminMenu(
         .text("🏙️ Города", "admin_cities")
         .row()
         .text("⚙️ Конфигурация", "admin_config")
+        .text("")
         .text("🏠 Главное меню", "menu");
 
     if (option === "edit") {

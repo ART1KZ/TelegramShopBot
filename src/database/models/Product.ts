@@ -1,4 +1,4 @@
-import { Schema, model } from "mongoose";
+import { Schema, model, Types } from "mongoose";
 
 const ProductSchema = new Schema({
     created_at: {
@@ -15,13 +15,10 @@ const ProductSchema = new Schema({
         required: true,
     },
     rub_price: {
-        type: Number,
+        type: Types.Decimal128,
         required: true,
     },
-    btc_price: {
-        type: Number,
-        required: true,
-    },
+    btc_price: { type: Types.Decimal128, required: true },
     status: {
         type: String,
         enum: ["available", "reserved", "sold"],
@@ -38,7 +35,7 @@ const ProductSchema = new Schema({
     sold_at: {
         type: Date || null,
         default: null,
-    }
+    },
 });
 
 const Product = model("Product", ProductSchema);
