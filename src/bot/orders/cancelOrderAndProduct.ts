@@ -1,14 +1,14 @@
-import { Transaction, Product } from "../../database/models";
+import { Order, Product } from "../../database/models";
 import { Types } from "mongoose";
 
-async function cancelTransactionAndProduct(
-    transactionId: Types.ObjectId,
+async function cancelOrderAndProduct(
+    orderId: Types.ObjectId,
     productId: Types.ObjectId
 ) {
     // Отмена транзакции
-    await Transaction.updateOne(
+    await Order.updateOne(
         {
-            _id: transactionId,
+            _id: orderId,
             status: "pending",
         },
         { status: "canceled" }
@@ -21,4 +21,4 @@ async function cancelTransactionAndProduct(
     );
 }
 
-export default cancelTransactionAndProduct;
+export default cancelOrderAndProduct;

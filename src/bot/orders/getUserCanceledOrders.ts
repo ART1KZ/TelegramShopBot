@@ -1,4 +1,4 @@
-import { Transaction } from "../../database/models";
+import { Order } from "../../database/models";
 
 /**
  * Возвращает отменённые транзакции пользователя за последнее (переданное) количество минут.
@@ -7,15 +7,15 @@ import { Transaction } from "../../database/models";
  * @param {number} minutes - Количество минут, за которые нужно получить транзакции (должно быть положительным).
  * @returns Массив отменённых транзакций за указанный период.
  */
-async function getUserCanceledTransactions(tgUserId: number, minutes: number) {
+async function getUserCanceledOrders(tgUserId: number, minutes: number) {
     const timeIntervalMs = 1000 * 60 * minutes;
     const cutoffTime = new Date(Date.now() - timeIntervalMs);
 
-    return await Transaction.find({
+    return await Order.find({
         created_at: { $gt: cutoffTime },
         customer_tg_id: tgUserId,
         status: "canceled",
     });
 }
 
-export default getUserCanceledTransactions;
+export default getUserCanceledOrders;

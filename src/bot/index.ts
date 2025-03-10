@@ -1,16 +1,17 @@
 import { Bot, InlineKeyboard, session } from "grammy";
-import { City, Product, Transaction, Configuration } from "../database/models";
+import { City, Product, Order, Configuration } from "../database/models";
 import connectToDatabase from "../database/index";
 import { generateUniqueAmount, getUniqueProducts } from "./helpers";
 import { AdminProductsGroup, ExtendedContext, SessionData } from "./types";
 import { sendMainMenu, sendAdminMenu } from "./messages";
 import {
-    cancelTransactionAndProduct,
-    getUserCanceledTransactions,
-    scheduleTransactionsCleanup,
+    cancelOrderAndProduct,
+    getUserCanceledOrders,
+    scheduleOrdersCleanup,
     sendInvoicePayable,
-} from "./transations";
-import mongoose, { Decimal128 } from "mongoose";
+    checkPaymentApi,
+} from "./orders";
+import mongoose from "mongoose";
 import sendSuccessfulMessage from "./messages/sendSuccessfulMessage";
 
 if (!process.env.TG_BOT_TOKEN) {
@@ -19,10 +20,8 @@ if (!process.env.TG_BOT_TOKEN) {
 
 const bot = new Bot<ExtendedContext>(process.env.TG_BOT_TOKEN);
 
-// Поиск и отмена транзакций, находящихся в ожидании больше часа, каждые 5 минут
-scheduleTransactionsCleanup(60);
+scheduleOrdersCleanup(120);
 
-// Helper functions for initial data setup
 async function createCitiesIfNotExist() {
     const cities = await City.find();
     if (!cities.length) {
@@ -48,8 +47,8 @@ async function createProductsIfNotExist() {
                 name: "Подписка Netflix 1 месяц",
                 city_id: citiesIds[0],
                 data: "NETFLIX-12345-XYZ",
-                btc_price: "0.0005", // Число → строка
-                rub_price: "1200", // Число → строка
+                btc_price: "0.0005",
+                rub_price: "1200",
             }),
             Product.create({
                 name: "Лицензия Adobe Photoshop",
@@ -246,15 +245,13 @@ async function addRecords() {
 
 addRecords();
 
-// Мидлвара хранящая сессии
 bot.use(
     session({
         initial: (): SessionData => ({
-            step: "start",
+            userStartMessageId: null,
             cityId: null,
-            productId: null,
             botLastMessageId: null,
-            botOrderMessageId: null,
+            lastPaymentCheck: null,
             userAdminPassword: undefined,
             adminStep: undefined,
             adminProductGroups: undefined,
@@ -262,7 +259,6 @@ bot.use(
     })
 );
 
-// Мидлавара для проверки прав администратора
 bot.use(async (ctx, next) => {
     const callbackData = ctx.callbackQuery?.data;
     if (callbackData?.startsWith("admin_") && callbackData !== "admin_panel") {
@@ -281,7 +277,6 @@ bot.use(async (ctx, next) => {
 
 bot.command("start", async (ctx) => await sendMainMenu(ctx));
 
-// Обработчик нажатий на кнопки
 bot.on("callback_query:data", async (ctx) => {
     try {
         const data = ctx.callbackQuery.data;
@@ -343,6 +338,9 @@ bot.on("callback_query:data", async (ctx) => {
                 break;
             case data.startsWith("admin_create_product_"):
                 await createAdminProduct(ctx, data);
+                break;
+            case data === "admin_orders":
+                await showOrders(ctx, true);
                 break;
             default:
                 await ctx.answerCallbackQuery("Неизвестная команда");
@@ -465,7 +463,7 @@ async function purchaseProduct(ctx: ExtendedContext, data: string) {
     }
 
     const userId = ctx.from.id;
-    const pending = await Transaction.findOne({
+    const pending = await Order.findOne({
         customer_tg_id: userId,
         status: "pending",
     });
@@ -474,7 +472,7 @@ async function purchaseProduct(ctx: ExtendedContext, data: string) {
         return;
     }
 
-    const cancels = await getUserCanceledTransactions(userId, 10);
+    const cancels = await getUserCanceledOrders(userId, 10);
     if (cancels.length > 2) {
         await ctx.answerCallbackQuery(
             "Слишком много отмен заказов. Подождите 10 минут"
@@ -486,7 +484,7 @@ async function purchaseProduct(ctx: ExtendedContext, data: string) {
     product.reserved_at = new Date();
     await product.save();
 
-    const transaction = new Transaction({
+    const order = new Order({
         customer_tg_id: userId,
         product_id: product._id,
         btc_amount: generateUniqueAmount(
@@ -494,48 +492,77 @@ async function purchaseProduct(ctx: ExtendedContext, data: string) {
         ),
         status: "pending",
     });
-    await transaction.save();
+    await order.save();
 
-    await sendInvoicePayable(ctx, transaction, product, config.btc_address);
+    await sendInvoicePayable(ctx, order, product, config.btc_address);
 }
 
 async function cancelPurchase(ctx: ExtendedContext, data: string) {
-    const transactionId = data.split("_")[1];
-    const transaction = await Transaction.findOne({
-        _id: transactionId,
+    const orderId = data.split("_")[1];
+    const order = await Order.findOne({
+        _id: orderId,
         status: "pending",
     });
 
-    if (!transaction) {
-        await await sendMainMenu(ctx, "edit");
+    if (!order) {
+        await sendMainMenu(ctx, "edit");
         return;
     }
 
-    await cancelTransactionAndProduct(
-        new mongoose.Types.ObjectId(transactionId),
-        new mongoose.Types.ObjectId(transaction.product_id)
+    await cancelOrderAndProduct(
+        new mongoose.Types.ObjectId(orderId),
+        new mongoose.Types.ObjectId(order.product_id)
     );
     await sendMainMenu(ctx, "edit");
 }
 
 async function checkPayment(ctx: ExtendedContext, data: string) {
-    const transactionId = data.split("_")[1];
-    const transaction = await Transaction.findOne({
-        _id: transactionId,
+    const lastPaymentCheck = ctx.session.lastPaymentCheck;
+    const currentTime = Date.now();
+    const minuteInMs = 1000 * 60;
+
+    if (
+        lastPaymentCheck &&
+        lastPaymentCheck.getTime() + minuteInMs > currentTime
+    ) {
+        const allowedTimeToCheck = lastPaymentCheck.getTime() + minuteInMs;
+        const secondsLeftToCheck = Math.floor(((allowedTimeToCheck - currentTime) / 1000));
+        await ctx.answerCallbackQuery(`Подождите ${secondsLeftToCheck} секунд`);
+        return;
+    }
+
+    const orderId = data.split("_")[1];
+    const order = await Order.findOne({
+        _id: orderId,
         status: "pending",
     });
 
-    if (!transaction) {
+    if (!order) {
         await ctx.answerCallbackQuery("Не удалось проверить оплату");
         return;
     }
 
-    const paid = true; // Placeholder for actual payment check logic
-    if (paid) {
-        transaction.status = "completed";
-        await transaction.save();
+    const config = await Configuration.findOne();
+    if (!config?.btc_address) {
+        await ctx.answerCallbackQuery("Адрес оплаты не настроен");
+        return;
+    }
 
-        const product = await Product.findById(transaction.product_id);
+    const btcAmount = parseFloat(order.btc_amount.toString());
+    const paymentResult = await checkPaymentApi(
+        config.btc_address,
+        btcAmount,
+        order.created_at,
+        24 // проверка транзакций за последние 24 часа
+    );
+    ctx.session.lastPaymentCheck = new Date();
+
+    if (paymentResult.paid) {
+        order.status = "completed";
+        order.tx_hash = paymentResult.tx_hash; // сохранение хеша транзакции
+        await order.save();
+
+        const product = await Product.findById(order.product_id);
         if (product) {
             product.status = "sold";
             product.sold_at = new Date();
@@ -543,8 +570,9 @@ async function checkPayment(ctx: ExtendedContext, data: string) {
 
             await ctx.editMessageText(
                 `<b>🎉 Спасибо за покупку!</b>\n` +
-                    `<b>🆔 Заказ №:</b> <code>${transaction._id}</code>\n` +
-                    `<b>💎 Ваш товар:</b> <code>${product.data}</code>`,
+                    `<b>🆔 Заказ №:</b> <code>${order._id}</code>\n` +
+                    `<b>💎 Ваш товар:</b> <code>${product.data}</code>\n` +
+                    `<b>🔗 Хэш транзакции:</b> <code>${paymentResult.tx_hash}</code>`,
                 {
                     reply_markup: {
                         inline_keyboard: [
@@ -565,13 +593,30 @@ async function checkPayment(ctx: ExtendedContext, data: string) {
     }
 }
 
-async function showOrders(ctx: ExtendedContext) {
+async function showOrders(ctx: ExtendedContext, admin: boolean = false) {
+    if (admin) {
+        ctx.session.adminStep = "admin_find_order";
+        await ctx.editMessageText(
+            "<b>🔎 Введите № заказа</b>\n" +
+                "✅ Пример: <code>67cdc2bfd4c99c56fcd3f2f4</code>",
+            {
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: "❌ Назад", callback_data: "admin_panel" }],
+                    ],
+                },
+                parse_mode: "HTML",
+            }
+        );
+        return;
+    }
+
     if (!ctx.from || !ctx.from.id) {
         await ctx.answerCallbackQuery("Не удалось определить пользователя");
         return;
     }
 
-    const orders = await Transaction.find({
+    const orders = await Order.find({
         customer_tg_id: ctx.from.id,
         status: { $in: ["completed", "pending", "canceled"] },
     });
@@ -587,11 +632,9 @@ async function showOrders(ctx: ExtendedContext) {
             const product = await Product.findById(order.product_id);
             if (product) {
                 let icon = order.status === "completed" ? "✅" : "🔄";
-
                 if (order.status === "canceled") {
                     icon = "🚫";
                 }
-
                 keyboard
                     .text(`${icon} ${product.name}`, `order_${order._id}`)
                     .row();
@@ -608,21 +651,19 @@ async function showOrders(ctx: ExtendedContext) {
 }
 
 async function selectOrder(ctx: ExtendedContext, data: string) {
-    const transactionId = data.split("_")[1];
-    const transaction = await Transaction.findById(transactionId);
-    const product = transaction
-        ? await Product.findById(transaction.product_id)
-        : null;
+    const orderId = data.split("_")[1];
+    const order = await Order.findById(orderId);
+    const product = order ? await Product.findById(order.product_id) : null;
     const config = await Configuration.findOne();
 
-    if (!transaction || !product || !config?.btc_address) {
+    if (!order || !product || !config?.btc_address) {
         await ctx.answerCallbackQuery("Заказ не найден");
         return;
     }
 
     if (product.status === "sold") {
         await ctx.editMessageText(
-            `<b>🆔 Заказ №:</b> <code>${transaction._id}</code>\n` +
+            `<b>🆔 Заказ №:</b> <code>${order._id}</code>\n` +
                 `<b>🏷️ Название товара:</b> ${product.name}\n` +
                 `<b>💎 Товар:</b> <code>${product.data}</code>`,
             {
@@ -635,10 +676,10 @@ async function selectOrder(ctx: ExtendedContext, data: string) {
             }
         );
     } else if (product.status === "reserved") {
-        await sendInvoicePayable(ctx, transaction, product, config.btc_address);
+        await sendInvoicePayable(ctx, order, product, config.btc_address);
     } else {
         await ctx.editMessageText(
-            `<b>🆔 Заказ №:</b> <code>${transaction._id}</code>\n` +
+            `<b>🆔 Заказ №:</b> <code>${order._id}</code>\n` +
                 `<b>🏷️ Название товара:</b> ${product.name}\n` +
                 `<b>❌ Статус:</b> Отменен`,
             {
@@ -656,7 +697,7 @@ async function selectOrder(ctx: ExtendedContext, data: string) {
 async function deleteCanceledOrders(ctx: ExtendedContext, data: string) {
     const userId = ctx.callbackQuery?.from.id;
 
-    const hasCanceledOrders = (await Transaction.findOne({
+    const hasCanceledOrders = (await Order.findOne({
         customer_tg_id: userId,
         status: "canceled",
     }))
@@ -668,7 +709,7 @@ async function deleteCanceledOrders(ctx: ExtendedContext, data: string) {
         return;
     }
 
-    await Transaction.deleteMany({
+    await Order.deleteMany({
         customer_tg_id: userId,
         status: "canceled",
     });
@@ -829,7 +870,6 @@ async function handleAdminOption(ctx: ExtendedContext, data: string) {
         const productsGroup = groupedProductsWithIds.filter((group) => {
             return group.id === parseInt(id);
         })[0];
-
         const products = await Product.find({
             name: productsGroup.name,
             rub_price: productsGroup.rub_price,
@@ -843,7 +883,7 @@ async function handleAdminOption(ctx: ExtendedContext, data: string) {
                 .text(
                     `#️⃣ ${index + 1}`,
                     `admin_option_product_${product.id}_${id}`
-                ) // ${id} - id группы
+                )
                 .row();
         });
         keyboard
@@ -963,8 +1003,7 @@ async function updateAdminItem(ctx: ExtendedContext, data: string) {
         );
     } else if (type === "address") {
         const hasPending =
-            (await Transaction.find({ status: "pending" }).countDocuments()) >
-            0;
+            (await Order.find({ status: "pending" }).countDocuments()) > 0;
         if (hasPending) {
             await ctx.answerCallbackQuery(
                 "Нельзя изменить адрес при активных заказах"
@@ -1036,7 +1075,6 @@ async function showAdminCities(ctx: ExtendedContext) {
     });
 }
 
-// Выбор города после нажатия на кнопку Товары в админке
 async function showAdminProducts(ctx: ExtendedContext) {
     ctx.session.adminProductGroups = undefined;
     const cities = await City.find();
@@ -1095,17 +1133,17 @@ async function createAdminProduct(ctx: ExtendedContext, data: string) {
 async function addOrUpdateProduct(
     ctx: ExtendedContext,
     userMessage: string,
-    productId: string = ""
+    productId: string = "",
+    groupId: string = ""
 ) {
     const session = ctx.session;
-    const messageParts = userMessage.split(",").map((part) => part.trim()); // Разделение сообщения по запятым
-    const backButtonCallback_data =
-        productId !== ""
-            ? `admin_option_product_${productId}`
+    const messageParts = userMessage.split(",").map((part) => part.trim());
+    const backButtonCallbackData =
+        productId && groupId
+            ? `admin_option_product_${productId}_${groupId}`
             : `admin_option_productCities_${session.cityId}`;
 
     if (messageParts.length !== 4) {
-        // Проверка, что введено 4 части
         const msg = await ctx.reply(
             "<b>⚠️ Неверный формат!</b>\n" +
                 "Используйте: <code>Название, Цена в RUB, Цена в BTC, Код</code>\n" +
@@ -1116,7 +1154,7 @@ async function addOrUpdateProduct(
                         [
                             {
                                 text: "❌ Отмена",
-                                callback_data: backButtonCallback_data,
+                                callback_data: backButtonCallbackData,
                             },
                         ],
                     ],
@@ -1132,7 +1170,6 @@ async function addOrUpdateProduct(
     const rubPrice = rubPriceStr;
     const btcPrice = btcPriceStr;
 
-    // Проверка корректности данных
     if (
         !name ||
         !rubPrice ||
@@ -1156,7 +1193,7 @@ async function addOrUpdateProduct(
                         [
                             {
                                 text: "❌ Отмена",
-                                callback_data: backButtonCallback_data,
+                                callback_data: backButtonCallbackData,
                             },
                         ],
                     ],
@@ -1168,80 +1205,118 @@ async function addOrUpdateProduct(
         return false;
     }
 
-    if (productId) {
-        const updatedProduct = await Product.updateOne(
-            { id: productId },
-            {
+    try {
+        if (productId) {
+            const updateResult = await Product.updateOne(
+                { _id: productId },
+                {
+                    name,
+                    rub_price: mongoose.Types.Decimal128.fromString(rubPrice),
+                    btc_price: mongoose.Types.Decimal128.fromString(btcPrice),
+                    data,
+                }
+            );
+            if (updateResult.matchedCount === 0) {
+                await ctx.reply("<b>⚠️ Товар не найден</b>", {
+                    parse_mode: "HTML",
+                });
+                return false;
+            }
+            const updatedProduct = await Product.findById(productId);
+            await ctx.reply(
+                `<b>✅ Товар успешно изменён:</b>\n` +
+                    `<code>${
+                        updatedProduct?.name
+                    }, ${updatedProduct?.rub_price.toString()}, ${updatedProduct?.btc_price.toString()}, ${
+                        updatedProduct?.data
+                    }</code>`,
+                {
+                    reply_markup: {
+                        inline_keyboard: [
+                            [
+                                {
+                                    text: "🏠 В меню",
+                                    callback_data: "admin_panel",
+                                },
+                            ],
+                        ],
+                    },
+                    parse_mode: "HTML",
+                }
+            );
+        } else {
+            const createdProduct = await Product.create({
                 name,
+                city_id: session.cityId,
                 rub_price: mongoose.Types.Decimal128.fromString(rubPrice),
                 btc_price: mongoose.Types.Decimal128.fromString(btcPrice),
-            }
-        );
-
-        await ctx.reply(
-            `<b>✅ Товар успешно изменен: </b>\n<code>${updatedProduct}</code>`,
-            {
-                reply_markup: {
-                    inline_keyboard: [
-                        [
-                            {
-                                text: "🏠 В меню",
-                                callback_data: "admin_panel",
-                            },
+                data,
+                status: "available",
+            });
+            await ctx.reply(
+                `<b>✅ Товар успешно создан:</b>\n` +
+                    `<code>${
+                        createdProduct.name
+                    }, ${createdProduct.rub_price.toString()}, ${createdProduct.btc_price.toString()}, ${
+                        createdProduct.data
+                    }</code>`,
+                {
+                    reply_markup: {
+                        inline_keyboard: [
+                            [
+                                {
+                                    text: "🏠 В меню",
+                                    callback_data: "admin_panel",
+                                },
+                            ],
                         ],
-                    ],
-                },
-                parse_mode: "HTML",
-            }
-        );
+                    },
+                    parse_mode: "HTML",
+                }
+            );
+        }
         session.adminStep = undefined;
         session.cityId = null;
         return true;
+    } catch (error) {
+        console.error("Ошибка при создании/обновлении товара:", error);
+        await ctx.reply(
+            "<b>⚠️ Ошибка при обработке товара. Попробуйте позже.</b>",
+            {
+                parse_mode: "HTML",
+            }
+        );
+        return false;
     }
-
-    const createdProduct = await Product.create({
-        name,
-        city_id: session.cityId,
-        rub_price: rubPrice,
-        btc_price: btcPrice,
-        data,
-        status: "available",
-    });
-
-    await ctx.reply(
-        `<b>✅ Товар успешно создан: </b>\n<code>${createdProduct}</code>`,
-        {
-            reply_markup: {
-                inline_keyboard: [
-                    [
-                        {
-                            text: "🏠 В меню",
-                            callback_data: "admin_panel",
-                        },
-                    ],
-                ],
-            },
-            parse_mode: "HTML",
-        }
-    );
-    session.adminStep = undefined;
-    session.cityId = null;
-    return true;
 }
 
 bot.on("message", async (ctx) => {
     try {
-        // Удаление сообщения пользователя сразу
-        await ctx.deleteMessage();
+        try {
+            await ctx.deleteMessage();
+        } catch (e) {
+            console.warn("Не удалось удалить сообщение пользователя:", e);
+        }
 
         const session = ctx.session;
         const text = ctx.message.text?.trim();
 
         if (!text) return;
 
+        // Удаление предыдущего сообщения бота, если оно есть
         if (session.botLastMessageId) {
-            await ctx.api.deleteMessage(ctx.chat.id, session.botLastMessageId);
-            session.botLastMessageId = null;
+            try {
+                await ctx.api.deleteMessage(
+                    ctx.chat.id,
+                    session.botLastMessageId
+                );
+                session.botLastMessageId = null;
+            } catch (e) {
+                console.warn(
+                    "Не удалось удалить предыдущее сообщение бота:",
+                    e
+                );
+            }
         }
 
         if (session.adminStep === "password_input") {
@@ -1288,10 +1363,12 @@ bot.on("message", async (ctx) => {
                 }
             } else if (type === "product") {
                 const productId = id;
+                const groupId = parts[4];
                 const isSuccessful = await addOrUpdateProduct(
                     ctx,
                     text,
-                    productId
+                    productId,
+                    groupId
                 );
                 if (!isSuccessful) {
                     return;
@@ -1304,6 +1381,95 @@ bot.on("message", async (ctx) => {
             session.adminStep = undefined;
         } else if (session.adminStep === "admin_create_product") {
             await addOrUpdateProduct(ctx, text);
+        } else if (session.adminStep === "admin_find_order") {
+            // Проверка, является ли текст валидным ObjectId
+            if (!mongoose.Types.ObjectId.isValid(text)) {
+                const msg = await ctx.reply(
+                    "<b>⚠️ Неверный формат ID заказа</b>\n" +
+                        "Введите корректный ID, например: <code>67cdc2bfd4c99c56fcd3f2f4</code>",
+                    {
+                        reply_markup: {
+                            inline_keyboard: [
+                                [
+                                    {
+                                        text: "❌ Назад",
+                                        callback_data: "admin_panel",
+                                    },
+                                ],
+                            ],
+                        },
+                        parse_mode: "HTML",
+                    }
+                );
+                session.botLastMessageId = msg.message_id;
+                return;
+            }
+
+            const order = await Order.findById(text).populate("product_id");
+            session.adminStep = undefined;
+
+            if (!order) {
+                const msg = await ctx.reply("<b>🚫 Заказ не найден</b>", {
+                    reply_markup: {
+                        inline_keyboard: [
+                            [
+                                {
+                                    text: "❌ Назад",
+                                    callback_data: "admin_orders",
+                                },
+                            ],
+                        ],
+                    },
+                    parse_mode: "HTML",
+                });
+                session.botLastMessageId = msg.message_id;
+                return;
+            }
+
+            const product = order.product_id as any;
+            const city = await City.findById(product?.city_id);
+            const statusText =
+                order.status === "pending"
+                    ? "🔄 Ожидает оплаты"
+                    : order.status === "completed"
+                    ? "✅ Завершён"
+                    : "🚫 Отменён";
+
+            const msg = await ctx.reply(
+                `<b>🆔 Номер заказа:</b> <code>${order._id}</code>\n` +
+                    `<b>👤 ID клиента:</b> <code>${order.customer_tg_id}</code>\n` +
+                    `<b>📦 Товар:</b> ${product?.name || "Не найден"}\n` +
+                    `<b>🌆 Город:</b> ${city?.name || "Не указан"}\n` +
+                    `<b>₿ Сумма в BTC:</b> ${order.btc_amount}\n` +
+                    `<b>⚡ Статус:</b> ${statusText}\n` +
+                    `<b>📅 Создан:</b> ${new Date(
+                        order.created_at
+                    ).toLocaleString()}\n` +
+                    `<b>🔗 Хэш транзакции:</b> ${
+                        order.tx_hash
+                            ? `<code>${order.tx_hash}</code>`
+                            : "Не указан"
+                    }\n` +
+                    `<b>💎 Данные товара:</b> ${
+                        product?.data
+                            ? `<code>${product.data}</code>`
+                            : "Не доступны"
+                    }`,
+                {
+                    reply_markup: {
+                        inline_keyboard: [
+                            [
+                                {
+                                    text: "❌ Назад",
+                                    callback_data: "admin_orders",
+                                },
+                            ],
+                        ],
+                    },
+                    parse_mode: "HTML",
+                }
+            );
+            session.botLastMessageId = msg.message_id;
         } else {
             const msg = await ctx.reply(
                 "<b>❓ Не понял вашей команды</b>\n\nЧтобы открыть меню, введите /start",
@@ -1313,7 +1479,7 @@ bot.on("message", async (ctx) => {
         }
     } catch (error) {
         console.error("Ошибка в обработке сообщения:", error);
-        await ctx.reply("⚠️ Произошла ошибка. Попробуйте позже", {
+        const msg = await ctx.reply("⚠️ Произошла ошибка. Попробуйте позже", {
             reply_markup: {
                 inline_keyboard: [
                     [
@@ -1326,10 +1492,10 @@ bot.on("message", async (ctx) => {
             },
             parse_mode: "HTML",
         });
+        ctx.session.botLastMessageId = msg.message_id;
     }
 });
 
-// Error handler
 bot.catch((err) => console.error("Ошибка в боте:", err));
 
 bot.start();

@@ -1,11 +1,10 @@
 import { AdminProductsGroup } from "./index";
 
 interface SessionData {
-    step: string;
+    userStartMessageId: number | null;
     cityId: string | null;
-    productId: string | null;
     botLastMessageId: number | null;
-    botOrderMessageId: number | null;
+    lastPaymentCheck: Date | null;
     userAdminPassword: string | undefined;
     adminStep: string | undefined;
     adminProductGroups: AdminProductsGroup[] | undefined;

@@ -11,13 +11,14 @@ async function sendAdminMenu(
     const botMessage = `
 <b>✨ Админ-панель</b>
 Ниже представлены разделы, с которыми вы можете взаимодействовать. Выберите один из них:
-    `;
+    `; // приветственное сообщение в админ панели
     const adminMenuKeyboard = new InlineKeyboard()
         .text("🛍️ Товары", "admin_products")
         .text("🏙️ Города", "admin_cities")
         .row()
+        .text("🛒 Заказы", "admin_orders")
         .text("⚙️ Конфигурация", "admin_config")
-        .text("")
+        .row()
         .text("🏠 Главное меню", "menu");
 
     if (option === "edit") {
@@ -25,6 +26,24 @@ async function sendAdminMenu(
             reply_markup: adminMenuKeyboard,
             parse_mode: "HTML",
         });
+    }
+
+    // Если создается новое сообщение, удаляет предыдущее
+    if (session.botLastMessageId) {
+        if (ctx?.chat?.id) {
+            try {
+                await ctx.api.deleteMessage(
+                    ctx.chat.id,
+                    session.botLastMessageId
+                );
+                session.botLastMessageId = null;
+            } catch (e) {
+                console.warn(
+                    "Не удалось удалить предыдущее сообщение бота:",
+                    e
+                );
+            }
+        }
     }
 
     const sendedMessageId = await ctx
