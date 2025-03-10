@@ -58,7 +58,7 @@ async function sendMainMenu(
             parse_mode: "HTML",
         })
         .then((message) => message.message_id);
-    
+
     // Удаление предыдущей команды start пользователя
     if (ctx.message?.message_id) {
         session.userStartMessageId = ctx.message.message_id;

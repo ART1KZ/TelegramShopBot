@@ -5,7 +5,8 @@ async function sendErrorMessage(
     backButtonData: "admin_panel" | "menu" = "menu",
     option: "create" | "edit" = "create"
 ) {
-    const message = "<b>⚠️ Непредвиденная ошибка. Вероятно неправильный формат вашего ответа</b>";
+    const message =
+        "<b>⚠️ Непредвиденная ошибка. Вероятно неправильный формат вашего ответа</b>";
     const keyboard = {
         inline_keyboard: [
             [{ text: "🏠 В меню", callback_data: backButtonData }],
