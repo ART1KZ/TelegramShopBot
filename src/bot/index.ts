@@ -1,16 +1,16 @@
 import { Bot, InlineKeyboard, session } from "grammy";
 import { City, Product, Order, Configuration } from "../database/models";
 import connectToDatabase from "../database/index";
-import { generateUniqueAmount, getUniqueProducts } from "./helpers";
+import { selectProduct, purchaseProduct } from "./products";
 import { AdminProductsGroup, ExtendedContext, SessionData } from "./types";
 import { sendMainMenu, sendAdminMenu } from "./messages";
 import {
     cancelOrderAndProduct,
-    getUserCanceledOrders,
     scheduleOrdersCleanup,
     sendInvoicePayable,
     checkPaymentApi,
 } from "./orders";
+import { showCities, selectCity } from "./cities";
 import mongoose from "mongoose";
 import sendSuccessfulMessage from "./messages/sendSuccessfulMessage";
 
@@ -21,206 +21,6 @@ if (!process.env.TG_BOT_TOKEN) {
 const bot = new Bot<ExtendedContext>(process.env.TG_BOT_TOKEN);
 
 scheduleOrdersCleanup(120);
-
-async function createCitiesIfNotExist() {
-    const cities = await City.find();
-    if (!cities.length) {
-        await Promise.all([
-            City.create({ name: "Токио" }),
-            City.create({ name: "Лондон" }),
-            City.create({ name: "Нью-Йорк" }),
-            City.create({ name: "Берлин" }),
-            City.create({ name: "Сидней" }),
-            City.create({ name: "Москва" }),
-            City.create({ name: "Сингапур" }),
-        ]);
-    }
-}
-
-async function createProductsIfNotExist() {
-    const products = await Product.find();
-    if (!products.length) {
-        const cities = await City.find();
-        const citiesIds = cities.map((city) => city.id);
-        await Promise.all([
-            Product.create({
-                name: "Подписка Netflix 1 месяц",
-                city_id: citiesIds[0],
-                data: "NETFLIX-12345-XYZ",
-                btc_price: "0.0005",
-                rub_price: "1200",
-            }),
-            Product.create({
-                name: "Лицензия Adobe Photoshop",
-                city_id: citiesIds[1],
-                data: "ADOBE-PS-98765",
-                btc_price: "0.015",
-                rub_price: "4500",
-            }),
-            Product.create({
-                name: "Ключ Steam $50",
-                city_id: citiesIds[2],
-                data: "STEAM-50USD-ABCDE",
-                btc_price: "0.002",
-                rub_price: "4800",
-            }),
-            Product.create({
-                name: "Подписка Spotify Premium",
-                city_id: citiesIds[3],
-                data: "SPOTIFY-3M-54321",
-                btc_price: "0.0004",
-                rub_price: "900",
-            }),
-            Product.create({
-                name: "Цифровой код PlayStation Plus",
-                city_id: citiesIds[4],
-                data: "PSPLUS-12M-XYZ123",
-                btc_price: "0.0018",
-                rub_price: "3600",
-            }),
-            Product.create({
-                name: "Ключ активации Windows 11 Pro",
-                city_id: citiesIds[5],
-                data: "WIN11-PRO-7890-ABC",
-                btc_price: "0.003",
-                rub_price: "7500",
-            }),
-            Product.create({
-                name: "Подписка Xbox Game Pass",
-                city_id: citiesIds[6],
-                data: "XBOX-GP-6M-45678",
-                btc_price: "0.0012",
-                rub_price: "2400",
-            }),
-            Product.create({
-                name: "Цифровой код Amazon $25",
-                city_id: citiesIds[0],
-                data: "AMAZON-25USD-DEF456",
-                btc_price: "0.001",
-                rub_price: "2300",
-            }),
-            Product.create({
-                name: "Ключ VPN NordVPN 1 год",
-                city_id: citiesIds[1],
-                data: "NORDVPN-1Y-123XYZ",
-                btc_price: "0.0025",
-                rub_price: "6000",
-            }),
-            Product.create({
-                name: "Подписка YouTube Premium",
-                city_id: citiesIds[2],
-                data: "YT-PREM-3M-ABC789",
-                btc_price: "0.0006",
-                rub_price: "1500",
-            }),
-            Product.create({
-                name: "Лицензия Microsoft Office 365",
-                city_id: citiesIds[3],
-                data: "OFFICE-365-1Y-XYZ987",
-                btc_price: "0.0028",
-                rub_price: "7000",
-            }),
-            Product.create({
-                name: "Код Roblox 1000 Robux",
-                city_id: citiesIds[4],
-                data: "ROBLOX-1000R-DEF123",
-                btc_price: "0.00045",
-                rub_price: "1000",
-            }),
-            Product.create({
-                name: "Подписка Discord Nitro",
-                city_id: citiesIds[5],
-                data: "DISCORD-NITRO-1M-456XYZ",
-                btc_price: "0.00035",
-                rub_price: "800",
-            }),
-            Product.create({
-                name: "Ключ активации Kaspersky",
-                city_id: citiesIds[6],
-                data: "KASPERSKY-1Y-789ABC",
-                btc_price: "0.0015",
-                rub_price: "3000",
-            }),
-            Product.create({
-                name: "Цифровой код Google Play $10",
-                city_id: citiesIds[0],
-                data: "GOOGLE-PLAY-10USD-XYZ456",
-                btc_price: "0.0004",
-                rub_price: "950",
-            }),
-            Product.create({
-                name: "Ключ активации ESET NOD32",
-                city_id: citiesIds[1],
-                data: "ESET-NOD32-1Y-ABC123",
-                btc_price: "0.0013",
-                rub_price: "2800",
-            }),
-            Product.create({
-                name: "Подписка Apple Music 3 месяца",
-                city_id: citiesIds[2],
-                data: "APPLE-MUSIC-3M-DEF789",
-                btc_price: "0.0007",
-                rub_price: "1600",
-            }),
-            Product.create({
-                name: "Код Fortnite 2800 V-Bucks",
-                city_id: citiesIds[3],
-                data: "FORTNITE-2800VB-XYZ456",
-                btc_price: "0.0011",
-                rub_price: "2500",
-            }),
-            Product.create({
-                name: "Лицензия CorelDRAW",
-                city_id: citiesIds[4],
-                data: "COREL-DRAW-2023-ABC987",
-                btc_price: "0.012",
-                rub_price: "4000",
-            }),
-            Product.create({
-                name: "Подписка Twitch Turbo",
-                city_id: citiesIds[5],
-                data: "TWITCH-TURBO-1M-DEF123",
-                btc_price: "0.0003",
-                rub_price: "700",
-            }),
-            Product.create({
-                name: "Ключ активации Autodesk AutoCAD",
-                city_id: citiesIds[6],
-                data: "AUTOCAD-2023-XYZ789",
-                btc_price: "0.025",
-                rub_price: "9000",
-            }),
-            Product.create({
-                name: "Цифровой код iTunes $15",
-                city_id: citiesIds[0],
-                data: "ITUNES-15USD-ABC456",
-                btc_price: "0.0006",
-                rub_price: "1400",
-            }),
-            Product.create({
-                name: "Подписка Paramount+ 1 месяц",
-                city_id: citiesIds[1],
-                data: "PARAMOUNT-1M-DEF789",
-                btc_price: "0.00045",
-                rub_price: "1100",
-            }),
-            Product.create({
-                name: "Ключ VPN ExpressVPN 6 месяцев",
-                city_id: citiesIds[2],
-                data: "EXPRESSVPN-6M-XYZ123",
-                btc_price: "0.002",
-                rub_price: "4800",
-            }),
-            Product.create({
-                name: "Код Minecraft Java Edition",
-                city_id: citiesIds[3],
-                data: "MINECRAFT-JAVA-ABC789",
-                btc_price: "0.0014",
-                rub_price: "3200",
-            }),
-        ]);
-    }
-}
 
 async function createConfigurationIfNotExist() {
     const configCount = await Configuration.countDocuments();
@@ -235,11 +35,12 @@ async function createConfigurationIfNotExist() {
 async function addRecords() {
     try {
         await connectToDatabase();
-        await createCitiesIfNotExist();
-        await createProductsIfNotExist();
         await createConfigurationIfNotExist();
     } catch (e) {
-        console.error("Failed to create test records:", e);
+        console.error(
+            "Не удалось инициализировать начальные записи в базе данных",
+            e
+        );
     }
 }
 
@@ -294,8 +95,11 @@ bot.on("callback_query:data", async (ctx) => {
             case data.startsWith("purchase_"):
                 await purchaseProduct(ctx, data);
                 break;
+            case data.startsWith("confirm_cancel_"):
+                await confirmCancel(ctx, data);
+                break;
             case data.startsWith("cancel_"):
-                await cancelPurchase(ctx, data);
+                await cancelOrder(ctx, data);
                 break;
             case data.startsWith("check_"):
                 await checkPayment(ctx, data);
@@ -351,89 +155,22 @@ bot.on("callback_query:data", async (ctx) => {
     }
 });
 
-async function showCities(ctx: ExtendedContext) {
-    const cities = await City.find();
-    if (!cities.length) {
-        await ctx.editMessageText("<b>⚠️ Ошибка:</b> Города не найдены", {
-            reply_markup: {
-                inline_keyboard: [
-                    [{ text: "❌ Назад", callback_data: "menu" }],
-                ],
-            },
-            parse_mode: "HTML",
-        });
-        return;
-    }
-
-    const keyboard = new InlineKeyboard();
-    cities.forEach((city, i) => {
-        keyboard.text(`🏙️ ${city.name}`, `city_${city._id}`);
-        if ((i + 1) % 2 === 0 || i === cities.length - 1) keyboard.row();
-    });
-    keyboard.row().text("❌ Назад", "menu");
-
-    await ctx.editMessageText("<b>🌆 Выберите город:</b>", {
-        reply_markup: keyboard,
-        parse_mode: "HTML",
-    });
-}
-
-async function selectCity(ctx: ExtendedContext, data: string) {
-    const cityId = data.split("_")[1];
-    ctx.session.cityId = cityId;
-
-    const uniqueProducts = await getUniqueProducts(cityId);
-    if (!uniqueProducts.length) {
-        await ctx.answerCallbackQuery("В этом городе нет доступных товаров");
-        return;
-    }
-
-    const keyboard = new InlineKeyboard();
-    uniqueProducts.forEach((product, i) => {
-        keyboard.text(
-            `📦 ${product.name} - ${product.rub_price} RUB`,
-            `product_${product.name}_${product.rub_price}`
-        );
-        if ((i + 1) % 2 === 0 || i === uniqueProducts.length - 1)
-            keyboard.row();
-    });
-    keyboard.row().text("❌ Назад", "cities");
-
-    await ctx.editMessageText("<b>🛒 Выберите товар:</b>", {
-        reply_markup: keyboard,
-        parse_mode: "HTML",
-    });
-}
-
-async function selectProduct(ctx: ExtendedContext, data: string) {
-    const [_, name, rubPrice] = data.split("_");
-    const product = await Product.findOne({
-        name,
-        rub_price: parseInt(rubPrice),
-        status: "available",
-        city_id: ctx.session.cityId,
-    });
-
-    if (!product) {
-        await ctx.answerCallbackQuery("Товар недоступен");
-        return;
-    }
-
+async function confirmCancel(ctx: ExtendedContext, data: string) {
+    const orderId = data.split("_")[2];
     await ctx.editMessageText(
-        `<b>📦 Товар:</b> "${product.name}"\n<b>💸 Цена:</b> ${product.rub_price} RUB`,
+        "<b>❓ Вы уверены, что хотите отменить заказ?\n</b>" +
+            "<b>⚠️ Не отменяйте заказ, если уже перевели деньги</b>",
         {
             reply_markup: {
                 inline_keyboard: [
                     [
                         {
-                            text: "🛒 Купить",
-                            callback_data: `purchase_${product.name}`,
+                            text: "✅ Отменить заказ",
+                            callback_data: `cancel_${orderId}`,
                         },
-                    ],
-                    [
                         {
-                            text: "❌ Назад",
-                            callback_data: `city_${ctx.session.cityId}`,
+                            text: "❌ Понюхать бебру",
+                            callback_data: `order_${orderId}`,
                         },
                     ],
                 ],
@@ -443,61 +180,7 @@ async function selectProduct(ctx: ExtendedContext, data: string) {
     );
 }
 
-async function purchaseProduct(ctx: ExtendedContext, data: string) {
-    if (!ctx.from || !ctx.from.id) {
-        await ctx.answerCallbackQuery("Не удалось определить пользователя");
-        return;
-    }
-
-    const name = data.split("_")[1];
-    const product = await Product.findOne({
-        name,
-        status: "available",
-        city_id: ctx.session.cityId,
-    });
-    const config = await Configuration.findOne();
-
-    if (!product || !config?.btc_address) {
-        await ctx.answerCallbackQuery("Ошибка при покупке");
-        return;
-    }
-
-    const userId = ctx.from.id;
-    const pending = await Order.findOne({
-        customer_tg_id: userId,
-        status: "pending",
-    });
-    if (pending) {
-        await ctx.answerCallbackQuery("У вас есть активный заказ");
-        return;
-    }
-
-    const cancels = await getUserCanceledOrders(userId, 10);
-    if (cancels.length > 2) {
-        await ctx.answerCallbackQuery(
-            "Слишком много отмен заказов. Подождите 10 минут"
-        );
-        return;
-    }
-
-    product.status = "reserved";
-    product.reserved_at = new Date();
-    await product.save();
-
-    const order = new Order({
-        customer_tg_id: userId,
-        product_id: product._id,
-        btc_amount: generateUniqueAmount(
-            product.btc_price as mongoose.Types.Decimal128
-        ),
-        status: "pending",
-    });
-    await order.save();
-
-    await sendInvoicePayable(ctx, order, product, config.btc_address);
-}
-
-async function cancelPurchase(ctx: ExtendedContext, data: string) {
+async function cancelOrder(ctx: ExtendedContext, data: string) {
     const orderId = data.split("_")[1];
     const order = await Order.findOne({
         _id: orderId,
@@ -526,7 +209,9 @@ async function checkPayment(ctx: ExtendedContext, data: string) {
         lastPaymentCheck.getTime() + minuteInMs > currentTime
     ) {
         const allowedTimeToCheck = lastPaymentCheck.getTime() + minuteInMs;
-        const secondsLeftToCheck = Math.floor(((allowedTimeToCheck - currentTime) / 1000));
+        const secondsLeftToCheck = Math.floor(
+            (allowedTimeToCheck - currentTime) / 1000
+        );
         await ctx.answerCallbackQuery(`Подождите ${secondsLeftToCheck} секунд`);
         return;
     }
@@ -621,11 +306,6 @@ async function showOrders(ctx: ExtendedContext, admin: boolean = false) {
         status: { $in: ["completed", "pending", "canceled"] },
     });
 
-    if (!orders.length) {
-        await ctx.answerCallbackQuery("У вас нет заказов");
-        return;
-    }
-
     const keyboard = new InlineKeyboard();
     await Promise.all(
         orders.map(async (order) => {
@@ -697,22 +377,30 @@ async function selectOrder(ctx: ExtendedContext, data: string) {
 async function deleteCanceledOrders(ctx: ExtendedContext, data: string) {
     const userId = ctx.callbackQuery?.from.id;
 
-    const hasCanceledOrders = (await Order.findOne({
+    const now = new Date(); // текущее время
+    const oneHourAgo = new Date(now.getTime() - 60 * 60 * 1000); // время час назад
+
+    // проверка, есть ли отменённые заказы старше 1 часа
+    const hasCanceledOrders = await Order.findOne({
         customer_tg_id: userId,
         status: "canceled",
-    }))
-        ? true
-        : false;
+        created_at: { $lt: oneHourAgo }, // заказы, созданные раньше, чем 1 час назад
+    });
 
     if (!hasCanceledOrders) {
-        await ctx.answerCallbackQuery("У вас нет отмененных заказов");
+        await ctx.answerCallbackQuery(
+            "У вас нет отменённых заказов старше часа"
+        );
         return;
     }
 
+    // удаляем все отменённые заказы старше 1 часа
     await Order.deleteMany({
         customer_tg_id: userId,
         status: "canceled",
+        created_at: { $lt: oneHourAgo },
     });
+
     await showOrders(ctx);
 }
 
@@ -720,7 +408,7 @@ async function showAdminPanel(ctx: ExtendedContext) {
     const config = await Configuration.findOne({
         admin_password: ctx.session.userAdminPassword,
     });
-    if (!config) {
+    if (!config || !ctx.session.userAdminPassword) {
         ctx.session.adminStep = "password_input";
         await ctx.editMessageText("<b>🔑 Введите ключ доступа:</b>", {
             reply_markup: {
@@ -1223,27 +911,30 @@ async function addOrUpdateProduct(
                 return false;
             }
             const updatedProduct = await Product.findById(productId);
-            await ctx.reply(
-                `<b>✅ Товар успешно изменён:</b>\n` +
-                    `<code>${
-                        updatedProduct?.name
-                    }, ${updatedProduct?.rub_price.toString()}, ${updatedProduct?.btc_price.toString()}, ${
-                        updatedProduct?.data
-                    }</code>`,
-                {
-                    reply_markup: {
-                        inline_keyboard: [
-                            [
-                                {
-                                    text: "🏠 В меню",
-                                    callback_data: "admin_panel",
-                                },
+            const sendedMessageId = await ctx
+                .reply(
+                    `<b>✅ Товар успешно изменён:</b>\n` +
+                        `<code>${
+                            updatedProduct?.name
+                        }, ${updatedProduct?.rub_price.toString()}, ${updatedProduct?.btc_price.toString()}, ${
+                            updatedProduct?.data
+                        }</code>`,
+                    {
+                        reply_markup: {
+                            inline_keyboard: [
+                                [
+                                    {
+                                        text: "🏠 В меню",
+                                        callback_data: "admin_panel",
+                                    },
+                                ],
                             ],
-                        ],
-                    },
-                    parse_mode: "HTML",
-                }
-            );
+                        },
+                        parse_mode: "HTML",
+                    }
+                )
+                .then((message) => message.message_id);
+            session.botLastMessageId = sendedMessageId;
         } else {
             const createdProduct = await Product.create({
                 name,
@@ -1253,27 +944,30 @@ async function addOrUpdateProduct(
                 data,
                 status: "available",
             });
-            await ctx.reply(
-                `<b>✅ Товар успешно создан:</b>\n` +
-                    `<code>${
-                        createdProduct.name
-                    }, ${createdProduct.rub_price.toString()}, ${createdProduct.btc_price.toString()}, ${
-                        createdProduct.data
-                    }</code>`,
-                {
-                    reply_markup: {
-                        inline_keyboard: [
-                            [
-                                {
-                                    text: "🏠 В меню",
-                                    callback_data: "admin_panel",
-                                },
+            const sendedMessageId = await ctx
+                .reply(
+                    `<b>✅ Товар успешно создан:</b>\n` +
+                        `<code>${
+                            createdProduct.name
+                        }, ${createdProduct.rub_price.toString()}, ${createdProduct.btc_price.toString()}, ${
+                            createdProduct.data
+                        }</code>`,
+                    {
+                        reply_markup: {
+                            inline_keyboard: [
+                                [
+                                    {
+                                        text: "🏠 В меню",
+                                        callback_data: "admin_panel",
+                                    },
+                                ],
                             ],
-                        ],
-                    },
-                    parse_mode: "HTML",
-                }
-            );
+                        },
+                        parse_mode: "HTML",
+                    }
+                )
+                .then((message) => message.message_id);
+            session.botLastMessageId = sendedMessageId;
         }
         session.adminStep = undefined;
         session.cityId = null;

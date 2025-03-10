@@ -17,10 +17,7 @@ async function manageExpiredOrders(minutes: number) {
 
     for (const order of expiredOrders) {
         try {
-            await cancelOrderAndProduct(
-                order._id,
-                order.product_id
-            ).then(() =>
+            await cancelOrderAndProduct(order._id, order.product_id).then(() =>
                 console.log(
                     `Отменена транзакция, находящаяся в ожидании ${order._id}`
                 )

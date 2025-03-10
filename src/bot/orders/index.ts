@@ -4,3 +4,4 @@ export { default as checkPaymentApi } from "./checkPaymentApi";
 export { default as getUserCanceledOrders } from "./getUserCanceledOrders";
 export { default as cancelOrderAndProduct } from "./cancelOrderAndProduct";
 export { default as sendInvoicePayable } from "./sendInvoicePayable";
+export { default as generateUniqueAmount } from "./generateUniqueAmount";
