@@ -17,7 +17,7 @@ async function checkPaymentApi(
 ): Promise<{ paid: boolean; tx_hash?: string }> {
     try {
         const response = await axios.get(
-            `https://api.blockcypher.com/v1/btc/main/addrs/${payableBtcAddress}`
+            `https://api.blockcypher.com/v1/btc/main/addrs/${payableBtcAddress}?token=${process.env.BLOCKCYPHER_API_TOKEN}`
         );
         const data = response.data;
 
